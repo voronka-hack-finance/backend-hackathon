@@ -146,7 +146,7 @@ Responsibilities:
 Does not own:
 
 - MinIO bucket creation;
-- public API;
+- public HTTP API or `/health` probes (one-shot CLI job; Compose uses `service_completed_successfully`);
 - business runtime.
 
 ### 4. create-bucket-service
@@ -165,7 +165,7 @@ Does not own:
 
 - PostgreSQL migrations;
 - file parsing;
-- public API.
+- public HTTP API or `/health` probes (one-shot CLI job).
 
 ### 5. file-service
 
@@ -201,6 +201,8 @@ Writes finance data during import:
 - accounts created from imported file context;
 - imported transactions;
 - raw imported categories/card metadata needed for import traceability.
+
+Integration note: spreadsheet account resolution is performed inside `finance-service` `transactions.bulk_create` during import (not a separate gateway HTTP call). Internal RPC `accounts.resolve_by_card` remains for other services. Cross-file transaction dedupe uses `(user_id, dedupe_key)`.
 
 ### 6. finance-service
 
@@ -451,7 +453,9 @@ Message names are draft contracts and may be renamed before implementation.
 - `analytics.expected_incomes.list`;
 - `analytics.expected_expenses.list`;
 - `analytics.available_balance.get`;
-- `analytics.member_budget.get`.
+- `analytics.member_budget.get`;
+- `analytics.member_budget.batch` (family group budget aggregation);
+- `analytics.regular_expenses.due_for_reminders` (scheduler integration).
 
 ### group-service
 

@@ -149,6 +149,26 @@ def test_mutation_endpoints_have_specific_request_models():
         assert _request_ref(operation) == f"#/components/schemas/{model_name}", f"{method.upper()} {path}"
 
 
+def test_all_openapi_operations_have_human_readable_description():
+    schema = app.openapi()
+    missing: list[str] = []
+
+    for path, path_item in schema["paths"].items():
+        for method, operation in path_item.items():
+            if method not in {"get", "post", "put", "patch", "delete"}:
+                continue
+            description = (operation.get("description") or "").strip()
+            if len(description) < 40:
+                missing.append(f"{method.upper()} {path}: {description!r}")
+
+    assert missing == [], "Endpoints without full description:\n" + "\n".join(missing)
+
+
+def test_openapi_info_has_gateway_description():
+    schema = app.openapi()
+    assert len(schema["info"]["description"].strip()) >= 80
+
+
 def test_transaction_query_params_forwards_type_alias():
     params = _transaction_query_params(
         date_from=None,

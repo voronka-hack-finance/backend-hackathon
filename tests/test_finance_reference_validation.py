@@ -3,7 +3,7 @@ from uuid import UUID
 import pytest
 
 from common.messaging import MessageError
-from services.finance_service.app.main import _validate_owned_references
+from services.finance_service.app.handlers import _validate_owned_references
 
 
 class FakeSession:

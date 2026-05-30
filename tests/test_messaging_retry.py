@@ -1,7 +1,5 @@
 import json
 
-import pika
-
 from common.messaging import MessageWorker, error_reply
 
 
@@ -27,7 +25,7 @@ def test_worker_declares_retry_queue_with_ttl_dead_letter_back_to_main_queue():
     )
     channel = FakeChannel()
 
-    worker._declare_retry_and_dead_queues(channel)
+    worker._declare_retry_and_dead_queues_sync(channel)
 
     assert {"queue": "sample-service.dead", "durable": True} in channel.declared
     assert {
@@ -53,12 +51,11 @@ def test_failed_background_message_is_published_to_retry_queue_before_dead_lette
     channel = FakeChannel()
     body = json.dumps({"type": "tasks.fail", "payload": {"id": 1}}).encode("utf-8")
 
-    worker._retry_or_dead_letter(channel, body, error_reply("corr-1", 500, "boom"))
+    worker._retry_or_dead_letter_sync(channel, body, error_reply("corr-1", 500, "boom"))
 
     assert len(channel.published) == 1
     published = channel.published[0]
     assert published["routing_key"] == "sample-service.retry"
-    assert isinstance(published["properties"], pika.BasicProperties)
     retried = json.loads(published["body"].decode("utf-8"))
     assert retried["retry"]["attempts"] == 1
     assert retried["retry"]["max_attempts"] == 3
@@ -84,7 +81,7 @@ def test_failed_background_message_goes_to_dead_queue_after_retry_limit():
         }
     ).encode("utf-8")
 
-    worker._retry_or_dead_letter(channel, body, error_reply("corr-1", 500, "boom"))
+    worker._retry_or_dead_letter_sync(channel, body, error_reply("corr-1", 500, "boom"))
 
     assert {"queue": "sample-service.dead", "durable": True} in channel.declared
     assert len(channel.published) == 1

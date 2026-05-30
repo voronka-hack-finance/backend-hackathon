@@ -3,7 +3,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 
-from services.finance_service.app.main import _apply_transaction_filters
+from services.finance_service.app.handlers import _apply_transaction_filters
 from services.finance_service.app.models import Transaction
 
 
