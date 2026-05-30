@@ -2,7 +2,7 @@
 
 Микросервисный backend для импорта семейного бюджета из Excel (`family-bugget.xlsx`), нормализации транзакций и MVP API для личных и семейных финансов.
 
-Публичный HTTP доступен **только** через `api-gateway` (`:8080`). Внутренние сервисы общаются через **RabbitMQ** (request-reply и фоновые задачи).
+Публичный HTTP доступен **только** через `api-gateway` (`:8081` на хосте). Внутренние сервисы общаются через **RabbitMQ** (request-reply и фоновые задачи).
 
 ## Визуальные материалы (заглушки)
 
@@ -34,7 +34,7 @@
 
 | Сервис | Порт (compose) | Назначение |
 |--------|----------------|------------|
-| `gateway` | 8080 | Публичный REST `/api/v1/*` → RabbitMQ |
+| `gateway` | 8081 | Публичный REST `/api/v1/*` → RabbitMQ |
 | `access-service` | — | Регистрация, JWT, refresh, `auth.verify_token` |
 | `file-service` | — | Загрузка Excel, MinIO, import jobs, парсер |
 | `finance-service` | — | Счета, транзакции, цели, лимиты, категории |
@@ -104,10 +104,10 @@ docker compose up --build
 Проверка gateway:
 
 ```http
-GET http://localhost:8080/api/v1/health
+GET http://localhost:8081/api/v1/health
 ```
 
-OpenAPI (локально): `http://localhost:8080/docs`
+OpenAPI (локально): `http://localhost:8081/docs`
 
 ### Happy path
 

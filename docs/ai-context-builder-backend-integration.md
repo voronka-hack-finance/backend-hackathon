@@ -624,7 +624,7 @@ loop:
 | Docker internal | `http://gateway:8000` |
 | Staging/prod | not defined in repo — configure per deployment |
 
-> README mentions port 8080; **docker-compose.yml maps 8081:8000** — use 8081 locally.
+> Локально gateway на хосте: **http://localhost:8081** (`docker-compose.yml`: `8081:8000`).
 
 ### 8.2 Existing env variables (backend)
 

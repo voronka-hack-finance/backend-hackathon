@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-BASE_URL = os.getenv("GATEWAY_BASE_URL", "http://localhost:8080")
+BASE_URL = os.getenv("GATEWAY_BASE_URL", "http://localhost:8081")
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/%2F")
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg://app:app@localhost:5432/family_budget")
 WORKBOOK = Path("family-bugget.xlsx")

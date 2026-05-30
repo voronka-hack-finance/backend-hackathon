@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -20,6 +22,37 @@ from common.redis_client import MessageIdempotencyGuard, get_idempotency_guard
 logger = logging.getLogger(__name__)
 
 JsonDict = dict[str, Any]
+
+
+def _agent_shutdown_log(location: str, message: str, data: dict[str, Any], hypothesis_id: str) -> None:
+    #region agent log
+    try:
+        payload = {
+            "sessionId": "2d11dd",
+            "location": location,
+            "message": message,
+            "data": data,
+            "hypothesisId": hypothesis_id,
+            "timestamp": int(time.time() * 1000),
+        }
+        log_path = Path(os.environ.get("AGENT_DEBUG_LOG", "debug-2d11dd.log"))
+        if not log_path.is_absolute():
+            log_path = Path.cwd() / log_path
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+    #endregion
+
+
+async def _close_amqp_connection(connection) -> None:
+    try:
+        if getattr(connection, "is_closed", False):
+            return
+        await connection.close()
+    except Exception:
+        # Connection/channel may already be closed during cooperative shutdown.
+        pass
 MessageHandler = Callable[[JsonDict, JsonDict], JsonDict | None]
 
 
@@ -36,12 +69,21 @@ class UserContext:
         return payload
 
 
-def _run_sync(coro):
+def _run_sync(coro, *, timeout: float | None = None):
+    """Run coroutine from sync code in a thread without a running asyncio loop."""
+
+    async def _runner() -> Any:
+        if timeout is None:
+            return await coro
+        return await asyncio.wait_for(coro, timeout=timeout)
+
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
-    raise RuntimeError("MessageBus synchronous API cannot be used inside a running event loop")
+        return asyncio.run(_runner())
+    raise RuntimeError(
+        "MessageBus synchronous API must not be called on the RabbitMQ consumer event-loop thread"
+    )
 
 
 class MessageBus:
@@ -59,13 +101,31 @@ class MessageBus:
         timeout_seconds: float = 30.0,
     ) -> JsonDict:
         return _run_sync(
-            self._request_async(
+            self.request_async(
                 queue_name,
                 message_type,
                 payload,
                 user=user,
                 timeout_seconds=timeout_seconds,
-            )
+            ),
+            timeout=timeout_seconds + 5.0,
+        )
+
+    async def request_async(
+        self,
+        queue_name: str,
+        message_type: str,
+        payload: JsonDict | None = None,
+        *,
+        user: UserContext | None = None,
+        timeout_seconds: float = 30.0,
+    ) -> JsonDict:
+        return await self._request_async(
+            queue_name,
+            message_type,
+            payload,
+            user=user,
+            timeout_seconds=timeout_seconds,
         )
 
     async def _request_async(
@@ -86,33 +146,36 @@ class MessageBus:
             future: asyncio.Future[JsonDict] = loop.create_future()
 
             async def on_response(message: AbstractIncomingMessage) -> None:
-                async with message.process():
-                    if message.correlation_id == correlation_id and not future.done():
-                        future.set_result(json.loads(message.body.decode("utf-8")))
+                # no_ack=True: do not use message.process() — it would call ack() and raise.
+                if message.correlation_id == correlation_id and not future.done():
+                    future.set_result(json.loads(message.body.decode("utf-8")))
 
-            await callback_queue.consume(on_response, no_ack=True)
-            envelope = build_envelope(
-                message_type=message_type,
-                source=self.source,
-                payload=payload or {},
-                correlation_id=correlation_id,
-                reply_to=callback_queue.name,
-                user=user,
-            )
-            await channel.default_exchange.publish(
-                AioMessage(
-                    body=json.dumps(envelope, ensure_ascii=False, default=str).encode("utf-8"),
+            consumer_tag = await callback_queue.consume(on_response, no_ack=True)
+            try:
+                envelope = build_envelope(
+                    message_type=message_type,
+                    source=self.source,
+                    payload=payload or {},
                     correlation_id=correlation_id,
                     reply_to=callback_queue.name,
-                    content_type="application/json",
-                    delivery_mode=DeliveryMode.PERSISTENT,
-                ),
-                routing_key=queue_name,
-            )
-            try:
-                return await asyncio.wait_for(future, timeout=timeout_seconds)
-            except asyncio.TimeoutError:
-                return error_reply(correlation_id, 504, f"Timed out waiting for {message_type}")
+                    user=user,
+                )
+                await channel.default_exchange.publish(
+                    AioMessage(
+                        body=json.dumps(envelope, ensure_ascii=False, default=str).encode("utf-8"),
+                        correlation_id=correlation_id,
+                        reply_to=callback_queue.name,
+                        content_type="application/json",
+                        delivery_mode=DeliveryMode.PERSISTENT,
+                    ),
+                    routing_key=queue_name,
+                )
+                try:
+                    return await asyncio.wait_for(future, timeout=timeout_seconds)
+                except asyncio.TimeoutError:
+                    return error_reply(correlation_id, 504, f"Timed out waiting for {message_type}")
+            finally:
+                await callback_queue.cancel(consumer_tag)
 
     def publish(
         self,
@@ -130,7 +193,8 @@ class MessageBus:
                 payload,
                 user=user,
                 correlation_id=correlation_id,
-            )
+            ),
+            timeout=30.0,
         )
 
     async def _publish_async(
@@ -189,6 +253,9 @@ class MessageWorker:
             self._idempotency = idempotency_guard
         self._thread: threading.Thread | None = None
         self._stopping = threading.Event()
+        self._consumer_lock = threading.Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._connection: Any = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -197,8 +264,47 @@ class MessageWorker:
         self._thread = threading.Thread(target=self._run, name=f"{self.service_name}-rabbitmq-worker", daemon=True)
         self._thread.start()
 
-    def stop(self) -> None:
+    def stop(self, timeout: float = 10.0) -> None:
+        _agent_shutdown_log(
+            "messaging.py:stop:enter",
+            "worker stop requested",
+            {"service": self.service_name},
+            "B",
+        )
         self._stopping.set()
+        self._request_connection_close(timeout=min(timeout, 5.0))
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=timeout)
+        _agent_shutdown_log(
+            "messaging.py:stop:exit",
+            "worker stop finished",
+            {"service": self.service_name, "thread_alive": bool(self._thread and self._thread.is_alive())},
+            "B",
+        )
+
+    def _request_connection_close(self, timeout: float) -> None:
+        with self._consumer_lock:
+            connection = self._connection
+            loop = self._loop
+        if connection is None or loop is None:
+            return
+        try:
+            if loop.is_closed():
+                return
+            future = asyncio.run_coroutine_threadsafe(_close_amqp_connection(connection), loop)
+            future.result(timeout=timeout)
+        except Exception as exc:
+            logger.debug(
+                "RabbitMQ shutdown close ignored for %s: %s",
+                self.service_name,
+                exc.__class__.__name__,
+            )
+            _agent_shutdown_log(
+                "messaging.py:stop:close_ignored",
+                "connection close during shutdown",
+                {"service": self.service_name, "error": exc.__class__.__name__},
+                "C",
+            )
 
     def _run(self) -> None:
         while not self._stopping.is_set():
@@ -208,32 +314,59 @@ class MessageWorker:
                 if not self._stopping.is_set():
                     logger.exception("RabbitMQ worker %s crashed; retrying", self.service_name)
                     time.sleep(2)
+        _agent_shutdown_log(
+            "messaging.py:_run:exit",
+            "worker thread exiting",
+            {"service": self.service_name},
+            "B",
+        )
 
     async def _consume_forever(self) -> None:
+        self._loop = asyncio.get_running_loop()
         connection = await aio_pika.connect_robust(self.rabbitmq_url)
-        async with connection:
-            channel = await connection.channel()
-            await channel.set_qos(prefetch_count=1)
-            await self._declare_retry_and_dead_queues(channel)
-            queue = await channel.declare_queue(self.queue_name, durable=True)
+        with self._consumer_lock:
+            self._connection = connection
+        _agent_shutdown_log(
+            "messaging.py:_consume_forever:connected",
+            "consumer connected",
+            {"service": self.service_name},
+            "C",
+        )
+        try:
+            async with connection:
+                channel = await connection.channel()
+                await channel.set_qos(prefetch_count=1)
+                await self._declare_retry_and_dead_queues(channel)
+                queue = await channel.declare_queue(self.queue_name, durable=True)
 
-            async with queue.iterator() as queue_iter:
-                async for message in queue_iter:
-                    if self._stopping.is_set():
-                        break
-                    async with message.process():
-                        reply = self._handle_message(message)
-                        if message.reply_to:
-                            await channel.default_exchange.publish(
-                                AioMessage(
-                                    body=json.dumps(reply, ensure_ascii=False, default=str).encode("utf-8"),
-                                    correlation_id=message.correlation_id,
-                                    content_type="application/json",
-                                ),
-                                routing_key=message.reply_to,
-                            )
-                        elif not reply.get("ok"):
-                            await self._retry_or_dead_letter(channel, message.body, reply)
+                async with queue.iterator() as queue_iter:
+                    async for message in queue_iter:
+                        if self._stopping.is_set():
+                            break
+                        async with message.process():
+                            # Handlers are sync and call bus.publish/request; run off the consumer loop.
+                            reply = await asyncio.to_thread(self._handle_message, message)
+                            if message.reply_to:
+                                await channel.default_exchange.publish(
+                                    AioMessage(
+                                        body=json.dumps(reply, ensure_ascii=False, default=str).encode("utf-8"),
+                                        correlation_id=message.correlation_id,
+                                        content_type="application/json",
+                                    ),
+                                    routing_key=message.reply_to,
+                                )
+                            elif not reply.get("ok"):
+                                await self._retry_or_dead_letter(channel, message.body, reply)
+        finally:
+            with self._consumer_lock:
+                self._connection = None
+                self._loop = None
+            _agent_shutdown_log(
+                "messaging.py:_consume_forever:finally",
+                "consumer released connection refs",
+                {"service": self.service_name, "stopping": self._stopping.is_set()},
+                "C",
+            )
 
     def _handle_message(self, message: AbstractIncomingMessage) -> JsonDict:
         correlation_id = message.correlation_id or str(uuid4())

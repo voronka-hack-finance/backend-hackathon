@@ -1,5 +1,7 @@
 x-app-env: &app-env
   DATABASE_URL: postgresql+psycopg://app:app@postgres:5432/family_budget
+  CORS_ORIGINS: "*"
+  GATEWAY_PUBLIC_URL: http://localhost:8081
   JWT_SECRET: dev-secret-change-me
   JWT_ISSUER: family-budget-backend
   MINIO_ENDPOINT: minio:9000
@@ -26,7 +28,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d family_budget"]
+      test: [ "CMD-SHELL", "pg_isready -U app -d family_budget" ]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -43,7 +45,7 @@ services:
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -54,7 +56,7 @@ services:
       - "5673:5672"
       - "15673:15672"
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -64,7 +66,7 @@ services:
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 20

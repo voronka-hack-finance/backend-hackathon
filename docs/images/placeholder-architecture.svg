@@ -6,7 +6,7 @@
   <text x="150" y="172" text-anchor="middle" font-size="14" font-weight="600">Frontend</text>
   <rect x="390" y="130" width="180" height="70" rx="8" fill="#ffe082" stroke="#f57c00" stroke-width="2"/>
   <text x="480" y="165" text-anchor="middle" font-size="14" font-weight="600">api-gateway</text>
-  <text x="480" y="185" text-anchor="middle" font-size="12">HTTP :8080</text>
+  <text x="480" y="185" text-anchor="middle" font-size="12">HTTP :8081</text>
   <rect x="720" y="130" width="180" height="70" rx="8" fill="#ffecb3" stroke="#f57c00" stroke-width="2"/>
   <text x="810" y="172" text-anchor="middle" font-size="14" font-weight="600">RabbitMQ</text>
   <line x1="240" y1="165" x2="390" y2="165" stroke="#e65100" stroke-width="2" marker-end="url(#arrow)"/>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 from typing import Any, Literal
 
@@ -11,22 +12,11 @@ from services.gateway.app.config import settings
 bus = MessageBus(settings.rabbitmq_url, "api-gateway-service")
 
 
-def rpc_call(
-    queue_name: str,
-    message_type: str,
-    payload: dict[str, Any],
+def _reply_to_payload(
+    reply: dict,
     *,
-    user: UserContext | None = None,
-    timeout_seconds: float | None = None,
     allow_status: set[int] | None = None,
 ) -> dict:
-    reply = bus.request(
-        queue_name,
-        message_type,
-        payload,
-        user=user,
-        timeout_seconds=timeout_seconds or settings.rpc_timeout_seconds,
-    )
     if reply.get("ok"):
         return reply.get("payload") or {}
     status_code = int(reply.get("status_code") or 502)
@@ -38,6 +28,48 @@ def rpc_call(
     elif status_code >= 500:
         detail = "Internal service error"
     raise HTTPException(status_code=status_code, detail=detail)
+
+
+def rpc_call(
+    queue_name: str,
+    message_type: str,
+    payload: dict[str, Any],
+    *,
+    user: UserContext | None = None,
+    timeout_seconds: float | None = None,
+    allow_status: set[int] | None = None,
+) -> dict:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        reply = bus.request(
+            queue_name,
+            message_type,
+            payload,
+            user=user,
+            timeout_seconds=timeout_seconds or settings.rpc_timeout_seconds,
+        )
+        return _reply_to_payload(reply, allow_status=allow_status)
+    raise RuntimeError("Use await rpc_call_async() from async FastAPI endpoints")
+
+
+async def rpc_call_async(
+    queue_name: str,
+    message_type: str,
+    payload: dict[str, Any],
+    *,
+    user: UserContext | None = None,
+    timeout_seconds: float | None = None,
+    allow_status: set[int] | None = None,
+) -> dict:
+    reply = await bus.request_async(
+        queue_name,
+        message_type,
+        payload,
+        user=user,
+        timeout_seconds=timeout_seconds or settings.rpc_timeout_seconds,
+    )
+    return _reply_to_payload(reply, allow_status=allow_status)
 
 
 def model_payload(model) -> dict[str, Any]:

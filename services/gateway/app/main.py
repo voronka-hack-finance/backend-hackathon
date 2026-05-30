@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.openapi.utils import get_openapi
 
 from services.gateway.app.config import settings
 from services.gateway.app.constants import OPENAPI_TAGS
@@ -30,6 +32,8 @@ app = FastAPI(
     description=APP_DESCRIPTION,
     version="0.2.0",
     openapi_tags=OPENAPI_TAGS,
+    docs_url=None,
+    redoc_url=None,
 )
 
 _cors_origins = settings.cors_origin_list()
@@ -40,6 +44,50 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _swagger_openapi_url(request: Request) -> str:
+    """Same-origin spec URL avoids CORS and wrong-port fetches (e.g. :8080 vs :8081)."""
+    base = str(request.base_url).rstrip("/")
+    if base.startswith(("http://", "https://")):
+        return "/openapi.json"
+    return f"{settings.public_base_url.rstrip('/')}/openapi.json"
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+        tags=app.openapi_tags,
+    )
+    schema["servers"] = [{"url": "/", "description": "Текущий хост gateway (тот же, что у /docs)"}]
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
+
+
+@app.get("/docs", include_in_schema=False)
+async def swagger_ui(request: Request):
+    return get_swagger_ui_html(
+        openapi_url=_swagger_openapi_url(request),
+        title=f"{app.title} — Swagger UI",
+        swagger_ui_parameters={"tryItOutEnabled": True},
+    )
+
+
+@app.get("/redoc", include_in_schema=False)
+async def redoc_ui(request: Request):
+    return get_redoc_html(
+        openapi_url=_swagger_openapi_url(request),
+        title=f"{app.title} — ReDoc",
+    )
+
 
 app.include_router(system.router)
 app.include_router(auth.router)

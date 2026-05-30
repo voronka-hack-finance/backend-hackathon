@@ -169,6 +169,11 @@ def test_openapi_info_has_gateway_description():
     assert len(schema["info"]["description"].strip()) >= 80
 
 
+def test_openapi_declares_gateway_server_url():
+    schema = app.openapi()
+    assert schema["servers"] == [{"url": "/", "description": "Текущий хост gateway (тот же, что у /docs)"}]
+
+
 def test_transaction_query_params_forwards_type_alias():
     params = _transaction_query_params(
         date_from=None,

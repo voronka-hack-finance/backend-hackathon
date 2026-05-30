@@ -17,7 +17,7 @@ from services.gateway.app.openapi_descriptions import (
     IMPORT_ERRORS,
     IMPORT_STATUS,
 )
-from services.gateway.app.rpc import model_payload, rpc_call
+from services.gateway.app.rpc import model_payload, rpc_call, rpc_call_async
 from services.gateway.app.schemas import (
     ErrorResponse,
     FileResponse,
@@ -49,7 +49,7 @@ async def upload_file(
     user: UserContext = Depends(current_user),
 ) -> dict:
     file_bytes = await file.read()
-    return rpc_call(
+    return await rpc_call_async(
         FILE_QUEUE,
         "files.upload.create",
         {
