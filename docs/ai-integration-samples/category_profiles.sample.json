@@ -1,0 +1,45 @@
+{
+  "_note": "MISSING ENDPOINT for AI category profiles. Backend GET /api/v1/categories returns user-defined account_categories (name, icon_key) without categoryGroup/canOptimize. Below: reference target shape with GAP markers; actual backend categories in backend_categories.",
+  "reference_target": [
+    {
+      "category": "Фастфуд",
+      "categoryGroup": "food_outside",
+      "canOptimize": true,
+      "protectedByDefault": false,
+      "isRequiredExpense": false
+    },
+    {
+      "category": "Зарплата",
+      "categoryGroup": "essential_fixed",
+      "canOptimize": false,
+      "protectedByDefault": true,
+      "isRequiredExpense": true
+    }
+  ],
+  "backend_categories": {
+    "items": [
+      {
+        "id": "33333333-3333-3333-3333-333333333333",
+        "account_id": null,
+        "created_by_user_id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "Еда вне дома",
+        "description": "User-defined label",
+        "icon_key": "food",
+        "is_archived": false,
+        "created_at": "2026-01-15T10:00:00+00:00",
+        "updated_at": "2026-01-15T10:00:00+00:00"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "page_size": 50,
+      "total": 1
+    }
+  },
+  "distinct_bank_categories_from_transactions": [
+    "Фастфуд",
+    "Супермаркеты",
+    "Зарплата",
+    "Транспорт"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "id": "44444444-4444-4444-4444-444444444444",
+      "account_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "owner_user_id": "550e8400-e29b-41d4-a716-446655440000",
+      "title": "Отпуск",
+      "description": "Летний отдых",
+      "target_amount": "150000.00",
+      "current_amount": "45000.00",
+      "currency": "RUB",
+      "target_date": "2027-01-15",
+      "status": "active",
+      "created_at": "2026-01-10T12:00:00+00:00",
+      "updated_at": "2026-05-20T14:30:00+00:00"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "page_size": 50,
+    "total": 1
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "_note": "NOT a single backend endpoint. Composite assembled by Context Builder from GET /accounts, GET /goals, GET /analytics/available-balance, GET /analytics/expected-incomes. Fields marked GAP have no backend source.",
+  "currentSavings": null,
+  "stableMonthlyIncome": "85000.00",
+  "hasDebt": null,
+  "monthlyDebtPayment": null,
+  "debtAmount": null,
+  "financialGoal": "Отпуск",
+  "goalAmount": "150000.00",
+  "goalDeadlineMonths": 8,
+  "salaryDay": 5,
+  "currentBalance": "52000.00",
+  "_assembly_sources": {
+    "currentBalance": "SUM(accounts[].current_balance) from GET /api/v1/accounts",
+    "stableMonthlyIncome": "MAX or AVG(expected_amount) from GET /api/v1/analytics/expected-incomes",
+    "financialGoal": "goals[0].title from GET /api/v1/goals where status=active",
+    "goalAmount": "goals[0].target_amount",
+    "goalDeadlineMonths": "computed from goals[0].target_date minus today",
+    "salaryDay": "GAP — not stored in backend",
+    "currentSavings": "GAP — not stored; could use goals[].current_amount sum",
+    "hasDebt": "GAP — debts entity missing",
+    "monthlyDebtPayment": "GAP",
+    "debtAmount": "GAP"
+  }
+}

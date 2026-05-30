@@ -51,8 +51,8 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "5673:5672"
+      - "15673:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
@@ -213,7 +213,7 @@ services:
     environment:
       <<: *app-env
     ports:
-      - "8080:8000"
+      - "8081:8000"
     depends_on:
       rabbitmq:
         condition: service_healthy
