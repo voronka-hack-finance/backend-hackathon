@@ -19,34 +19,6 @@ RUN apt-get update \
 COPY pyproject.toml README.md /app/
 COPY libs /app/libs
 
-# #region agent log
-RUN python - <<'PY'
-import json, subprocess, time
-entries = []
-for hypothesis_id, url, host, package in [
-    ("A", "https://mirror.yandex.ru/mirrors/pypi/simple", "mirror.yandex.ru", "setuptools"),
-    ("B", "https://mirrors.aliyun.com/pypi/simple/", "mirrors.aliyun.com", "setuptools"),
-    ("C", "https://pypi.org/simple", "pypi.org", "setuptools"),
-]:
-    result = subprocess.run(
-        ["python", "-m", "pip", "index", "versions", package,
-         "--index-url", url, "--trusted-host", host],
-        capture_output=True, text=True,
-    )
-    entries.append({
-        "sessionId": "c52e78",
-        "hypothesisId": hypothesis_id,
-        "location": "Dockerfile.service:mirror_probe",
-        "message": "pypi_mirror_probe",
-        "data": {"url": url, "package": package, "ok": result.returncode == 0,
-                 "stdout": result.stdout.splitlines()[:2], "stderr": result.stderr.splitlines()[:2]},
-        "timestamp": int(time.time() * 1000),
-        "runId": "pre-fix",
-    })
-print("AGENT_DEBUG_LOG", json.dumps(entries, ensure_ascii=False))
-PY
-# #endregion
-
 RUN python -m pip install --no-cache-dir --upgrade pip \
         --index-url "${PIP_INDEX_URL}" \
         --trusted-host "${PIP_TRUSTED_HOST}" \
