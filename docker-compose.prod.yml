@@ -1,0 +1,177 @@
+services:
+  postgres:
+    image: postgres:17.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: family_budget
+    volumes:
+      - backend-postgres-data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - backend-minio-data:/data
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  migration-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: python -m services.migration_service.app.main
+    restart: "no"
+    environment: &app_env
+      DATABASE_URL: postgresql+psycopg://app:app@postgres:5432/family_budget
+      JWT_SECRET: dev-secret-change-me
+      JWT_ISSUER: family-budget-backend
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_SECURE: "false"
+      UPLOADS_BUCKET: uploaded-files
+      UPLOADS_BUCKET_POLICY: private
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    depends_on:
+      - postgres
+
+  create-bucket-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: python -m services.create_bucket_service.app.main
+    restart: "no"
+    environment: *app_env
+    depends_on:
+      - minio
+      - migration-service
+
+  access-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: uvicorn services.access_service.app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    environment: *app_env
+    depends_on:
+      - rabbitmq
+      - migration-service
+
+  finance-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: uvicorn services.finance_service.app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    environment: *app_env
+    depends_on:
+      - rabbitmq
+      - migration-service
+
+  file-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: uvicorn services.file_service.app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    environment: *app_env
+    depends_on:
+      - rabbitmq
+      - migration-service
+      - create-bucket-service
+      - finance-service
+
+  analytics-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: uvicorn services.analytics_service.app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    environment: *app_env
+    depends_on:
+      - rabbitmq
+      - migration-service
+
+  scheduler-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: uvicorn services.scheduler_service.app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    environment: *app_env
+    depends_on:
+      - rabbitmq
+      - migration-service
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: uvicorn services.notification_service.app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    environment: *app_env
+    depends_on:
+      - rabbitmq
+      - migration-service
+
+  group-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: uvicorn services.group_service.app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    environment: *app_env
+    depends_on:
+      - rabbitmq
+      - migration-service
+
+  chat-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: uvicorn services.chat_service.app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    environment: *app_env
+    depends_on:
+      - rabbitmq
+      - migration-service
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: uvicorn services.gateway.app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    environment: *app_env
+    ports:
+      - "127.0.0.1:8081:8000"
+    depends_on:
+      - rabbitmq
+      - access-service
+      - file-service
+      - finance-service
+      - analytics-service
+      - notification-service
+      - group-service
+      - chat-service
+      - scheduler-service
+
+volumes:
+  backend-postgres-data:
+  backend-minio-data:
