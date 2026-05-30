@@ -1,0 +1,51 @@
+name: Deploy backend to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get repository code
+        uses: actions/checkout@v4
+
+      - name: Install SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Add VPS to known hosts
+        run: ssh-keyscan -p ${{ secrets.VPS_PORT }} ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Prepare backend directory
+        run: |
+          ssh -p ${{ secrets.VPS_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "mkdir -p /opt/zanachka/backend"
+
+      - name: Upload backend to server
+        run: |
+          rsync -avz --delete \
+            --exclude ".git" \
+            --exclude ".github" \
+            --exclude "__pycache__" \
+            --exclude ".pytest_cache" \
+            --exclude ".venv" \
+            -e "ssh -p ${{ secrets.VPS_PORT }}" \
+            ./ ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/zanachka/backend/
+
+      - name: Restart backend docker compose
+        run: |
+          ssh -p ${{ secrets.VPS_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+            set -e
+
+            cd /opt/zanachka/backend
+
+            docker compose down --remove-orphans
+            docker compose up -d --build
+
+            docker image prune -f
+          EOF
