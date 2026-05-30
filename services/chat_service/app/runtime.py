@@ -28,6 +28,7 @@ SERVICE_NAME = "chat-service"
 QUEUE_NAME = "chat-service"
 ANALYTICS_QUEUE = "analytics-service"
 FINANCE_QUEUE = "finance-service"
+HEALTH_SCORE_QUEUE = "health-score-service"
 
 bus = MessageBus(settings.rabbitmq_url, SERVICE_NAME)
 worker = MessageWorker(

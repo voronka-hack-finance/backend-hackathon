@@ -157,6 +157,38 @@ def handle_expected_expenses(payload: dict, envelope: dict) -> dict:
     return {"items": [_serialize(row) for row in rows], "pagination": {"page": page, "page_size": page_size, "total": total or 0}}
 
 
+def handle_regular_expenses_list(payload: dict, envelope: dict) -> dict:
+    user_id = UUID(require_user(envelope).id)
+    page, page_size = _page(payload)
+    status = payload.get("status")
+    params: dict[str, Any] = {"user_id": user_id, "offset": (page - 1) * page_size, "limit": page_size}
+    status_sql = ""
+    if status:
+        status_sql = "and status = :status"
+        params["status"] = str(status)
+    with SessionLocal() as db:
+        rows = db.execute(
+            text(
+                f"""
+                select id, account_id, category_id, merchant_pattern, average_amount,
+                       currency, frequency_days, next_expected_at, confidence,
+                       status, created_at, updated_at
+                from regular_expenses
+                where user_id = :user_id
+                  {status_sql}
+                order by next_expected_at nulls last, average_amount desc
+                offset :offset limit :limit
+                """
+            ),
+            params,
+        ).mappings().all()
+        total = db.scalar(
+            text(f"select count(*) from regular_expenses where user_id = :user_id {status_sql}"),
+            params,
+        )
+    return {"items": [_serialize(row) for row in rows], "pagination": {"page": page, "page_size": page_size, "total": total or 0}}
+
+
 def handle_member_budget(payload: dict, envelope: dict) -> dict:
     return handle_available_balance(payload, envelope)
 
@@ -365,6 +397,7 @@ MESSAGE_HANDLERS = {
     "analytics.available_balance.get": handle_available_balance,
     "analytics.expected_incomes.list": handle_expected_incomes,
     "analytics.expected_expenses.list": handle_expected_expenses,
+    "analytics.regular_expenses.list": handle_regular_expenses_list,
     "analytics.regular_expenses.due_for_reminders": handle_regular_expenses_due_for_reminders,
     "analytics.member_budget.get": handle_member_budget,
     "analytics.member_budget.batch": handle_member_budget_batch,

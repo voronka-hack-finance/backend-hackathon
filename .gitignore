@@ -7,6 +7,10 @@ __pycache__/
 .venv-tests/
 venv/
 .env
+infra/secrets/
+infra/firebase-service-account.json
+*firebase*service-account*.json
+!infra/firebase-service-account.json.example
 .local-object-store/
 htmlcov/
 dist/

@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from common.messaging import MessageError, require_user
-from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 

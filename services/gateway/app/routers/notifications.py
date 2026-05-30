@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from common.messaging import UserContext
 from services.gateway.app.constants import NOTIFICATION_QUEUE, PROTECTED_RESPONSES
 from services.gateway.app.dependencies import current_user
 from services.gateway.app.openapi_descriptions import (
     NOTIFICATIONS_DEVICES,
+    NOTIFICATIONS_DEVICES_LIST,
     NOTIFICATIONS_PERMISSION,
     NOTIFICATIONS_TEST,
 )
@@ -15,6 +16,7 @@ from services.gateway.app.schemas import (
     NotificationDeliveryResponse,
     NotificationDeviceRequest,
     NotificationDeviceResponse,
+    NotificationDevicesPageResponse,
     NotificationPermissionRequest,
     NotificationPreferenceResponse,
     NotificationTestRequest,
@@ -32,6 +34,26 @@ router = APIRouter(prefix="/api/v1/notifications", tags=["Notifications"])
 )
 def notification_permission(payload: NotificationPermissionRequest, user: UserContext = Depends(current_user)) -> dict:
     return rpc_call(NOTIFICATION_QUEUE, "notifications.permission.set", model_payload(payload), user=user)
+
+
+@router.get(
+    "/devices",
+    summary="Список устройств для push",
+    description=NOTIFICATIONS_DEVICES_LIST,
+    response_model=NotificationDevicesPageResponse,
+    responses=PROTECTED_RESPONSES,
+)
+def notification_devices_list(
+    user: UserContext = Depends(current_user),
+    page: int = Query(default=1, ge=1, description="Номер страницы."),
+    page_size: int = Query(default=50, ge=1, le=500, description="Размер страницы."),
+) -> dict:
+    return rpc_call(
+        NOTIFICATION_QUEUE,
+        "notifications.devices.list",
+        {"page": page, "page_size": page_size},
+        user=user,
+    )
 
 
 @router.post(

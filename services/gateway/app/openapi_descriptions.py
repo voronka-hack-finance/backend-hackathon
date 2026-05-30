@@ -126,6 +126,10 @@ NOTIFICATIONS_PERMISSION = (
     "Сохранение согласия пользователя на push-уведомления (push_enabled). "
     "При push_enabled=false доставки помечаются как пропущенные без вызова Firebase."
 )
+NOTIFICATIONS_DEVICES_LIST = (
+    "Список зарегистрированных устройств текущего пользователя с FCM-токенами и платформой. "
+    "Используйте перед обновлением токена, чтобы проверить device_id."
+)
 NOTIFICATIONS_DEVICES = (
     "Регистрация или обновление устройства для FCM: device_id, platform, firebase_token. "
     "Токен нужен для реальной отправки push при включённом FIREBASE_ENABLED на сервере."

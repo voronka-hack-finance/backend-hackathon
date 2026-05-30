@@ -7,6 +7,8 @@ Scope: backend MVP for fintech hackathon
 
 The project is an MVP for personal and family finance analysis and management.
 
+Financial health formulas and agent metric contracts are defined in `docs/Формулы_финансового_здоровья_и_ИИ_агенты.md`. A dedicated `health-score-service` implements those calculations using only data already stored by finance/analytics services.
+
 The exact hackathon case is still flexible, so the backend must keep service boundaries explicit and easy to revise.
 
 Core approved stack:
@@ -226,7 +228,7 @@ Responsibilities:
 - manages limits by account/category;
 - manages custom categories;
 - calculates current account values needed by finance screens;
-- answers RabbitMQ queries from analytics/group/scheduler when they need scoped finance data.
+- answers RabbitMQ queries from analytics/group/scheduler/health-score when they need scoped finance data.
 
 Owns user-facing finance read/write behavior for:
 
@@ -358,7 +360,7 @@ Responsibilities:
 - stores chat messages;
 - returns initial agent recommendations;
 - coordinates recommendation agents;
-- uses analytics/finance context through RabbitMQ messages when needed;
+- requests ready-made health/metrics profile from `health-score-service` instead of assembling ad-hoc finance/analytics slices;
 - keeps chat history separate from source finance data.
 
 Owns data:
@@ -366,6 +368,118 @@ Owns data:
 - `chats`;
 - `chat_messages`;
 - `agent_recommendations`.
+
+### 12. health-score-service
+
+Financial and credit health scoring service. Implements metric formulas from `docs/Формулы_финансового_здоровья_и_ИИ_агенты.md` using only data that already exists in the project.
+
+Approved public endpoints through gateway:
+
+- `GET /api/v1/health/profile` — full calculated metrics profile for the current period (the JSON shape from formulas doc section 8, with explicit `null` / `data_gaps` for unavailable fields);
+- `GET /api/v1/health/score` — compact dashboard view: `financial_health_score`, status label, `credit_load_index`, credit zone label, top 3 risk drivers;
+- `GET /api/v1/health/history` — paginated list of stored monthly snapshots for trend charts.
+
+Responsibilities:
+
+- aggregates scoped finance/analytics data through RabbitMQ request-reply (does not read other services' PostgreSQL tables directly);
+- normalizes transactions into income/expense/transfer/cash/uncategorized buckets for the selected period;
+- calculates primary metrics: `total_income`, `total_expenses`, `net_cashflow`, `expense_to_income_ratio`, `savings_rate`, category breakdowns;
+- calculates secondary metrics: `clarity_score`, category overspend vs limits, `forecast_expenses`, `forecast_balance`, `safe_daily_budget`, goal progress/affordability;
+- calculates composite indicators: `financial_health_score`, simplified `credit_load_index`;
+- stores monthly snapshot rows for history and cache;
+- publishes `health.profile.calculated.v1` event after successful recalculation (optional consumer: `chat-service`, `scheduler-service`);
+- exposes agent-ready profile payload for `chat-service` and external AI Context Builder (same contract as section 8 of the formulas doc).
+
+Does not own:
+
+- raw transactions, accounts, goals, limits, categories;
+- regular expense detection logic;
+- user-facing CRUD for finance entities;
+- LLM calls or chat history.
+
+#### Input data sources (existing project only)
+
+| Need | Source | RabbitMQ / field |
+|------|--------|------------------|
+| Transactions for period | `finance-service` | `transactions.list` with `date_from`, `date_to`, `status=OK`, pagination |
+| Period income/expense totals | `finance-service` | `transactions.sum_by_scope` |
+| Account balances | `finance-service` | `accounts.list` → `current_balance` |
+| Balance before period | `finance-service` | `finance.balance_before_period` |
+| Category limits | `finance-service` | `limits.list` |
+| Savings goals | `finance-service` | `goals.list` |
+| Regular (fixed) expenses | `analytics-service` | `analytics.regular_expenses.list` |
+| Expected income/expense | `analytics-service` | `analytics.expected_incomes.list`, `analytics.expected_expenses.list` |
+| Available funds snapshot | `analytics-service` | `analytics.available_balance.get` |
+
+Explicitly **not** available in the current backend (must not be invented):
+
+- `debts` entity, credit card limit/debt, `overdue_days` — see `docs/ai-integration-samples/debts.sample.json`;
+- `is_fixed` flag on transactions;
+- AI category profiles (`categoryGroup`, `canOptimize`) — see `docs/ai-integration-samples/category_profiles.sample.json`.
+
+#### Metric coverage and fallbacks
+
+**Fully supported from transactions + accounts + limits + goals + analytics:**
+
+- `total_income`, `total_expenses`, `net_cashflow`, `expense_to_income_ratio`, `savings_rate`, `expense_progress`;
+- `category_expenses`, `category_share`, `category_overspend`, `category_overspend_percent` (when `category_limits` exist);
+- `unclear_expenses`, `clarity_score` — bank categories `Переводы`, `Наличные`, plus expenses with empty `category_name`;
+- `optional_expenses` — static MVP mapping aligned with formulas doc: `Рестораны`, `Фастфуд`, `Маркетплейсы`, `Подписки` (matched by `category_name` case-insensitive);
+- `fixed_expenses` — sum of `regular_expenses.average_amount` where status `active` (proxy for `is_fixed`);
+- `variable_expenses` — `total_expenses - fixed_expenses`;
+- `saving_potential_soft/normal/hard` — from `optional_expenses`;
+- `average_daily_expense`, `forecast_expenses`, `forecast_balance`, `safe_daily_budget` — use `expected_incomes` / `expected_expenses` when present, otherwise current-month run-rate;
+- `goal_progress`, `required_monthly_saving`, `goal_affordability` — from `savings_goals`;
+- `reserve_months` — `SUM(accounts.current_balance) / mandatory_monthly_expenses`, where `mandatory_monthly_expenses = fixed_expenses + expenses in bank categories ЖКХ, Кредиты, Супермаркеты` for the period (normalized to monthly);
+- `income_stability_score` — coefficient of variation of monthly income totals over last 3 complete calendar months from transactions;
+- `financial_health_score` — weighted formula from doc section 5.1; components without data are excluded and weights renormalized (see below).
+
+**Partially supported (transaction-derived credit proxy only):**
+
+- `monthly_credit_payments` — sum of expense `payment_amount` where `category_name` matches `Кредиты` (or import alias `credits`) in the selected month;
+- `debt_to_income_ratio` — `monthly_credit_payments / average_monthly_income * 100`, where `average_monthly_income` is mean of last 3 months income totals;
+- `active_credits_count` — count of distinct `description` / merchant patterns among credit-category expenses with recurring pattern (≥2 months);
+- simplified `credit_load_index` — only components with data: `pdn_risk_score` (55%), `free_cashflow_after_debt_score` (10%), `active_credits_count_score` (5%); remaining weight redistributed proportionally; response includes `credit_load_index_partial: true`.
+
+**Not calculated (return `null` + reason in `data_gaps`):**
+
+- `credit_card_utilization`, `overdue_days`, `overdue_score`, `credit_card_utilization_score`;
+- exact `budget_score` when user has no `category_limits` covering ≥50% of expense categories;
+- `goal_score` when user has no active `savings_goals`.
+
+#### `financial_health_score` weight renormalization
+
+Base weights from formulas doc: cashflow 25%, debt 20%, reserve 15%, budget 15%, clarity 10%, goal 10%, income stability 5%.
+
+If a component cannot be computed, drop it and scale remaining weights to 100%. Example: no goals → goal 10% redistributed across other present components. Response always includes `score_components` with raw 0–100 values and `weights_applied`.
+
+#### Status labels (user-facing)
+
+| Score range | `financial_health_status` |
+|-------------|---------------------------|
+| 80–100 | `good` |
+| 60–79 | `stable_with_growth_areas` |
+| 40–59 | `needs_control` |
+| 20–39 | `survival_mode` |
+| 0–19 | `alert` |
+
+| Index range | `credit_load_zone` |
+|-------------|-------------------|
+| 0–25 | `green` |
+| 26–50 | `yellow` |
+| 51–75 | `orange` |
+| 76–100 | `red` |
+
+Owns data:
+
+- `health_score_snapshots` — monthly calculated profile JSON, composite scores, period key, `calculated_at`;
+- optional Redis cache keyed by `(user_id, period)` with TTL aligned to import/analytics refresh.
+
+Triggers for recalculation:
+
+- on demand via `GET /api/v1/health/profile?refresh=true`;
+- background task on `files.import.completed.v1` (user has new transactions);
+- optional nightly rescan per user with recent activity.
 
 ## Health And Readiness
 
@@ -380,7 +494,7 @@ Readiness examples:
 - `access-service`: PostgreSQL and RabbitMQ reachable;
 - `migration-service`: migrations completed successfully;
 - `create-bucket-service`: buckets exist;
-- file/finance/group/chat/analytics/scheduler/notification services: own DB dependencies and RabbitMQ reachable;
+- file/finance/group/chat/analytics/scheduler/notification/health-score services: own DB dependencies and RabbitMQ reachable;
 - `notification-service`: Firebase config present and RabbitMQ reachable.
 
 These probes are not business communication between services.
@@ -450,6 +564,7 @@ Message names are draft contracts and may be renamed before implementation.
 ### analytics-service
 
 - `analytics.regular_expenses.detect`;
+- `analytics.regular_expenses.list` (needed by `health-score-service` for `fixed_expenses`);
 - `analytics.expected_incomes.list`;
 - `analytics.expected_expenses.list`;
 - `analytics.available_balance.get`;
@@ -472,6 +587,19 @@ Message names are draft contracts and may be renamed before implementation.
 - `chats.*`;
 - `chat_messages.list`;
 - `chat_messages.create`.
+
+### health-score-service
+
+- `health.profile.get` — full agent-ready metrics profile for period;
+- `health.score.get` — compact score + status labels;
+- `health.history.list` — paginated snapshots;
+- `health.profile.recalculate` — background/full refresh command;
+- `health.profile.calculated.v1` — event after snapshot stored.
+
+Internal read dependencies (request-reply to other queues, not owned messages):
+
+- `transactions.list`, `transactions.sum_by_scope`, `accounts.list`, `finance.balance_before_period`, `limits.list`, `goals.list`;
+- `analytics.available_balance.get`, `analytics.expected_incomes.list`, `analytics.expected_expenses.list`, `analytics.regular_expenses.list`.
 
 ## Public API Draft
 
@@ -573,6 +701,19 @@ GET    /api/v1/chats/{chat_id}/messages
 POST   /api/v1/chats/{chat_id}/messages
 ```
 
+### Health
+
+```text
+GET /api/v1/health/profile
+GET /api/v1/health/score
+GET /api/v1/health/history
+```
+
+Query params for profile/score:
+
+- `period` — calendar month `YYYY-MM` (default: current UTC month);
+- `refresh` — `true` forces recalculation instead of cached snapshot.
+
 ### Technical Probes
 
 ```text
@@ -596,8 +737,29 @@ Primary ownership:
 | regular expenses, expected income/expense, available funds | analytics-service |
 | family groups, members, invitations | group-service |
 | chats, messages, agent recommendations | chat-service |
+| health score snapshots | health-score-service |
 | schema migrations | migration-service |
 | MinIO bucket bootstrap state | create-bucket-service |
+
+### health-score-service tables (draft)
+
+`health_score_snapshots`:
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid PK | |
+| user_id | uuid FK → users | |
+| period | varchar(7) | `YYYY-MM` |
+| financial_health_score | numeric(5,2) | 0–100 |
+| credit_load_index | numeric(5,2) | 0–100, may be partial |
+| financial_health_status | varchar(32) | enum-like string |
+| credit_load_zone | varchar(16) | green/yellow/orange/red |
+| profile_json | jsonb | full section-8 payload + `data_gaps` |
+| score_components | jsonb | per-component scores and applied weights |
+| calculated_at | timestamptz | |
+| created_at | timestamptz | |
+
+Unique: `(user_id, period)`.
 
 ## Parser Strategy
 
@@ -624,11 +786,11 @@ Rules:
 - Public clients can call only `api-gateway-service`.
 - Backend business services communicate through RabbitMQ only.
 - Health/ready endpoints are technical probes, not service-to-service business APIs.
-- Imported files, imports, transactions, accounts, goals, limits, categories, analytics, groups, notifications, and chats are user-scoped.
+- Imported files, imports, transactions, accounts, goals, limits, categories, analytics, health scores, groups, notifications, and chats are user-scoped.
 - Family/group access is handled by `group-service` plus finance/analytics checks through RabbitMQ.
 - Descriptions from source files are stored as-is for MVP.
 - Upload has no product-level max size for MVP, but invalid/corrupt/unsupported workbooks are rejected.
-- Simple dashboard sums can stay frontend-side unless explicitly owned by analytics/finance endpoint.
+- Simple dashboard sums can stay frontend-side unless explicitly owned by analytics/finance/health-score endpoint.
 
 ## MVP Build Order
 
@@ -642,11 +804,12 @@ Rules:
 8. `finance-service` account/transaction/category/limit/goal models and reads.
 9. Import flow: file parser creates/reuses accounts and inserts non-duplicate transactions.
 10. `analytics-service` regular expenses, expected income/expense, available funds.
-11. `scheduler-service` reminder and limit-warning planning.
-12. `notification-service` device storage and Firebase test/send path.
-13. `group-service` family CRUD, invitations, members, family budget assembly.
-14. `chat-service` recommendations, chats, messages.
-15. Integration tests for RabbitMQ request-reply and import happy path.
+11. `health-score-service` metric engine, snapshots, profile/score endpoints; consumes finance + analytics via RabbitMQ only.
+12. `scheduler-service` reminder and limit-warning planning.
+13. `notification-service` device storage and Firebase test/send path.
+14. `group-service` family CRUD, invitations, members, family budget assembly.
+15. `chat-service` recommendations, chats, messages; uses `health.profile.get` for agent context.
+16. Integration tests for RabbitMQ request-reply, import happy path, and health profile calculation.
 
 ## Decisions Log
 
@@ -677,6 +840,14 @@ Rules:
 - Rejected: file-service only storing files and delegating all finance writes.
 - Reason: user explicitly assigned import data persistence to file-service.
 - Trade-off: finance tables must have clear idempotency rules so file import and finance-service CRUD do not conflict.
+
+### Health-score-service boundary
+
+- Chosen: dedicated `health-score-service` owns all financial/credit health formulas and agent-ready metric profiles.
+- Rejected: pushing score calculation into `analytics-service` (different responsibility: forecasting/detection) or `chat-service` (LLM orchestration only).
+- Reason: formulas doc defines a stable metrics contract for UI and multiple AI agents; single calculator avoids duplication between chat, dashboard, and external Context Builder.
+- Trade-off: service orchestrates many RabbitMQ reads per profile; snapshots + Redis cache required for acceptable latency.
+- Data constraint: credit metrics use transaction-category proxy only until a future `debts` entity is approved; partial index is explicit in API responses.
 
 ## Proposals Not Yet Applied
 

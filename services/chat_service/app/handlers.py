@@ -9,6 +9,7 @@ from services.chat_service.app.runtime import (
     engine,
     ANALYTICS_QUEUE,
     FINANCE_QUEUE,
+    HEALTH_SCORE_QUEUE,
     bus,
 )
 
@@ -67,6 +68,21 @@ def handle_recommendations(payload: dict, envelope: dict) -> dict:
 
 
 def _recommendation_context(user: UserContext) -> dict:
+    health = bus.request(
+        HEALTH_SCORE_QUEUE,
+        "health.profile.get",
+        {},
+        user=user,
+        timeout_seconds=15.0,
+    )
+    if health.get("ok"):
+        health_payload = health.get("payload") or {}
+        return {
+            "available_amount": health_payload.get("forecast_balance") or "0",
+            "currency": "RUB",
+            "income_total": health_payload.get("total_income") or "0",
+            "expense_total": health_payload.get("total_expenses") or "0",
+        }
     analytics = bus.request(
         ANALYTICS_QUEUE,
         "analytics.available_balance.get",

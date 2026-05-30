@@ -22,9 +22,16 @@ class Settings(BaseSettings):
         validation_alias="DATABASE_URL",
     )
     rabbitmq_url: str = Field(default="amqp://guest:guest@localhost:5672/%2F", validation_alias="RABBITMQ_URL")
-    firebase_enabled: bool = Field(default=False, validation_alias="FIREBASE_ENABLED")
+    firebase_enabled: bool = Field(default=True, validation_alias="FIREBASE_ENABLED")
     firebase_credentials_json: str | None = Field(default=None, validation_alias="FIREBASE_CREDENTIALS_JSON")
-    firebase_credentials_path: str | None = Field(default=None, validation_alias="FIREBASE_CREDENTIALS_PATH")
+    firebase_credentials_path: str | None = Field(
+        default=None,
+        validation_alias="FIREBASE_CREDENTIALS_PATH",
+    )
+    firebase_project_id: str | None = Field(default=None, validation_alias="FIREBASE_PROJECT_ID")
+    firebase_client_email: str | None = Field(default=None, validation_alias="FIREBASE_CLIENT_EMAIL")
+    firebase_private_key: str | None = Field(default=None, validation_alias="FIREBASE_PRIVATE_KEY")
+    firebase_private_key_id: str | None = Field(default=None, validation_alias="FIREBASE_PRIVATE_KEY_ID")
 
     model_config = SettingsConfigDict(extra="ignore")
 

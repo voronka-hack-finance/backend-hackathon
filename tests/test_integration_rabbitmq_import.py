@@ -57,6 +57,12 @@ def test_gateway_rabbitmq_import_and_scheduler_smoke():
         status_payload = _wait_import(client, headers, import_id)
         transactions = client.get(f"{BASE_URL}/api/v1/transactions?type=income&page_size=1", headers=headers)
         transactions.raise_for_status()
+        health_profile = client.get(f"{BASE_URL}/api/v1/health/profile?refresh=true", headers=headers)
+        health_profile.raise_for_status()
+        health_score = client.get(f"{BASE_URL}/api/v1/health/score", headers=headers)
+        health_score.raise_for_status()
+        health_history = client.get(f"{BASE_URL}/api/v1/health/history", headers=headers)
+        health_history.raise_for_status()
         group = client.post(f"{BASE_URL}/api/v1/groups", headers=headers, json={"name": "Integration group"})
         group.raise_for_status()
         budget = client.get(f"{BASE_URL}/api/v1/groups/{group.json()['id']}/budget", headers=headers)
@@ -76,6 +82,9 @@ def test_gateway_rabbitmq_import_and_scheduler_smoke():
     assert status_payload["status"] == "completed"
     assert status_payload["parsed_rows"] == 2728
     assert transactions.json()["pagination"]["total"] == 340
+    assert health_profile.json()["credit_load_index_partial"] is True
+    assert health_score.json()["financial_health_score"] is not None
+    assert health_history.json()["pagination"]["total"] >= 1
     assert budget.json()["summary"]["currency"] == "RUB"
     assert scheduled["ok"] is True
     assert due["ok"] is True

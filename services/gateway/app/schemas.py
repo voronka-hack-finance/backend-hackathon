@@ -346,6 +346,11 @@ class NotificationDeviceResponse(BaseModel):
     updated_at: datetime = Field(description="Last update timestamp.")
 
 
+class NotificationDevicesPageResponse(BaseModel):
+    items: list[NotificationDeviceResponse]
+    pagination: PaginationResponse
+
+
 class NotificationDeliveryResponse(BaseModel):
     id: UUID = Field(description="Notification delivery identifier.")
     user_id: UUID = Field(description="Recipient user identifier.")
@@ -399,6 +404,60 @@ class ExpectedIncomesPageResponse(BaseModel):
 
 class ExpectedExpensesPageResponse(BaseModel):
     items: list[ExpectedExpenseResponse] = Field(description="Expected or derived expenses.")
+    pagination: PaginationResponse
+
+
+class HealthDataGapResponse(BaseModel):
+    field: str = Field(description="Metric that could not be calculated exactly.")
+    reason: str = Field(description="Human-readable reason for the missing or partial value.")
+
+
+class FinancialHealthProfileResponse(BaseModel):
+    period: str = Field(description="Calendar month in YYYY-MM format.", examples=["2026-05"])
+    period_start: date = Field(description="First day of the calculated period.")
+    period_end: date = Field(description="Last day of the calculated period.")
+    financial_health_score: str = Field(description="Financial health score from 0 to 100 as a decimal string.")
+    financial_health_status: str = Field(description="Financial health status label.")
+    credit_load_index: str = Field(description="Credit load index from 0 to 100 as a decimal string.")
+    credit_load_zone: str = Field(description="Credit load zone: green, yellow, orange, or red.")
+    credit_load_index_partial: bool = Field(description="True when credit scoring is calculated with MVP proxy data.")
+    total_income: str = Field(description="Income total for the period as a decimal string.")
+    total_expenses: str = Field(description="Expense total for the period as a decimal string.")
+    net_cashflow: str = Field(description="Income minus expenses as a decimal string.")
+    expense_to_income_ratio: str | None = Field(default=None, description="Expense-to-income percentage as a decimal string.")
+    savings_rate: str | None = Field(default=None, description="Savings rate percentage as a decimal string.")
+    score_components: dict[str, str | None] = Field(description="Normalized component scores used in the final score.")
+    weights_applied: dict[str, str] = Field(description="Renormalized component weights actually applied.")
+    data_gaps: list[HealthDataGapResponse] = Field(description="Unavailable or partially supported metrics.")
+    top_risk_drivers: list[str] = Field(description="Lowest-scoring drivers that need attention.")
+    calculated_at: datetime = Field(description="Snapshot calculation timestamp.")
+
+    model_config = {"extra": "allow"}
+
+
+class FinancialHealthScoreResponse(BaseModel):
+    period: str = Field(description="Calendar month in YYYY-MM format.", examples=["2026-05"])
+    financial_health_score: str = Field(description="Financial health score from 0 to 100 as a decimal string.")
+    financial_health_status: str = Field(description="Financial health status label.")
+    credit_load_index: str = Field(description="Credit load index from 0 to 100 as a decimal string.")
+    credit_load_zone: str = Field(description="Credit load zone: green, yellow, orange, or red.")
+    credit_load_index_partial: bool = Field(description="True when credit scoring is calculated with MVP proxy data.")
+    top_risk_drivers: list[str] = Field(description="Lowest-scoring drivers that need attention.")
+    data_gaps: list[HealthDataGapResponse] = Field(description="Unavailable or partially supported metrics.")
+    calculated_at: datetime = Field(description="Snapshot calculation timestamp.")
+
+
+class FinancialHealthHistoryItem(BaseModel):
+    period: str = Field(description="Calendar month in YYYY-MM format.")
+    financial_health_score: str | None = Field(default=None, description="Financial health score as a decimal string.")
+    financial_health_status: str = Field(description="Financial health status label.")
+    credit_load_index: str | None = Field(default=None, description="Credit load index as a decimal string.")
+    credit_load_zone: str = Field(description="Credit load zone label.")
+    calculated_at: datetime = Field(description="Snapshot calculation timestamp.")
+
+
+class FinancialHealthHistoryPageResponse(BaseModel):
+    items: list[FinancialHealthHistoryItem] = Field(description="Historical financial health snapshots.")
     pagination: PaginationResponse
 
 

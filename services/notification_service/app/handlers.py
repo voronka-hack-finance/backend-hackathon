@@ -5,9 +5,9 @@ from datetime import UTC
 from datetime import datetime
 from typing import Any
 from uuid import UUID
-import json
 from sqlalchemy import text
-from common.messaging import require_user
+from common.firebase_config import load_service_account_credentials
+from common.messaging import MessageError, require_user
 from services.notification_service.app.runtime import (
     engine,
     logger,
@@ -32,8 +32,46 @@ def handle_permission_set(payload: dict, envelope: dict) -> dict:
     return _serialize(row)
 
 
+def _page(payload: dict) -> tuple[int, int]:
+    page = max(int(payload.get("page") or 1), 1)
+    page_size = min(max(int(payload.get("page_size") or 50), 1), 500)
+    return page, page_size
+
+
+def handle_devices_list(payload: dict, envelope: dict) -> dict:
+    user_id = UUID(require_user(envelope).id)
+    page, page_size = _page(payload)
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                """
+                select id, user_id, device_id, platform, firebase_token, is_active, created_at, updated_at
+                from notification_devices
+                where user_id = :user_id
+                order by updated_at desc
+                offset :offset limit :limit
+                """
+            ),
+            {"user_id": user_id, "offset": (page - 1) * page_size, "limit": page_size},
+        ).mappings().all()
+        total = connection.scalar(
+            text("select count(*) from notification_devices where user_id = :user_id"),
+            {"user_id": user_id},
+        )
+    return {
+        "items": [_serialize(row) for row in rows],
+        "pagination": {"page": page, "page_size": page_size, "total": total or 0},
+    }
+
+
 def handle_device_save(payload: dict, envelope: dict) -> dict:
     user_id = UUID(require_user(envelope).id)
+    device_id = str(payload.get("device_id") or "").strip()
+    if not device_id:
+        raise MessageError(422, "device_id is required")
+    firebase_token = payload.get("firebase_token")
+    if firebase_token is not None:
+        firebase_token = str(firebase_token).strip() or None
     with engine.begin() as connection:
         row = connection.execute(
             text(
@@ -50,9 +88,9 @@ def handle_device_save(payload: dict, envelope: dict) -> dict:
             ),
             {
                 "user_id": user_id,
-                "device_id": str(payload.get("device_id") or ""),
+                "device_id": device_id,
                 "platform": payload.get("platform"),
-                "firebase_token": payload.get("firebase_token"),
+                "firebase_token": firebase_token,
             },
         ).mappings().one()
     return _serialize(row)
@@ -249,12 +287,20 @@ def _ensure_firebase_app():
     import firebase_admin
     from firebase_admin import credentials
 
-    if settings.firebase_credentials_path:
-        cred = credentials.Certificate(settings.firebase_credentials_path)
-    elif settings.firebase_credentials_json:
-        cred = credentials.Certificate(json.loads(settings.firebase_credentials_json))
-    else:
-        raise RuntimeError("Firebase enabled but credentials are not configured")
+    account = load_service_account_credentials(
+        credentials_json=settings.firebase_credentials_json,
+        credentials_path=settings.firebase_credentials_path,
+        project_id=settings.firebase_project_id,
+        client_email=settings.firebase_client_email,
+        private_key=settings.firebase_private_key,
+        private_key_id=settings.firebase_private_key_id,
+    )
+    if account is None:
+        raise RuntimeError(
+            "Firebase enabled but credentials are missing. Set FIREBASE_CREDENTIALS_PATH, "
+            "FIREBASE_CREDENTIALS_JSON, or FIREBASE_PROJECT_ID + FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY."
+        )
+    cred = credentials.Certificate(account)
     _firebase_app = firebase_admin.initialize_app(cred)
     return _firebase_app
 
@@ -275,6 +321,7 @@ def _serialize_value(value: Any) -> Any:
 
 MESSAGE_HANDLERS = {
     "notifications.permission.set": handle_permission_set,
+    "notifications.devices.list": handle_devices_list,
     "notifications.devices.save": handle_device_save,
     "notifications.test.send": handle_test_send,
     "notifications.send": handle_send,

@@ -1,3 +1,15 @@
+x-backend-build: &backend-build
+  context: .
+  dockerfile: Dockerfile.service
+  target: runtime
+  args:
+    PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirror.yandex.ru/mirrors/pypi/simple}
+    PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirror.yandex.ru}
+
+x-backend-image: &backend-image
+  build: *backend-build
+  image: family-budget-backend:latest
+
 services:
   postgres:
     image: postgres:17.4
@@ -28,9 +40,7 @@ services:
     restart: unless-stopped
 
   migration-service:
-    build:
-      context: .
-      dockerfile: Dockerfile.service
+    <<: *backend-image
     command: python -m services.migration_service.app.main
     restart: "no"
     environment: &app_env
@@ -52,9 +62,7 @@ services:
       - postgres
 
   create-bucket-service:
-    build:
-      context: .
-      dockerfile: Dockerfile.service
+    <<: *backend-image
     command: python -m services.create_bucket_service.app.main
     restart: "no"
     environment: *app_env
@@ -63,9 +71,7 @@ services:
       - migration-service
 
   access-service:
-    build:
-      context: .
-      dockerfile: Dockerfile.service
+    <<: *backend-image
     command: uvicorn services.access_service.app.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
     environment: *app_env
@@ -74,9 +80,7 @@ services:
       - migration-service
 
   finance-service:
-    build:
-      context: .
-      dockerfile: Dockerfile.service
+    <<: *backend-image
     command: uvicorn services.finance_service.app.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
     environment: *app_env
@@ -85,9 +89,7 @@ services:
       - migration-service
 
   file-service:
-    build:
-      context: .
-      dockerfile: Dockerfile.service
+    <<: *backend-image
     command: uvicorn services.file_service.app.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
     environment: *app_env
@@ -98,9 +100,7 @@ services:
       - finance-service
 
   analytics-service:
-    build:
-      context: .
-      dockerfile: Dockerfile.service
+    <<: *backend-image
     command: uvicorn services.analytics_service.app.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
     environment: *app_env
@@ -109,9 +109,7 @@ services:
       - migration-service
 
   scheduler-service:
-    build:
-      context: .
-      dockerfile: Dockerfile.service
+    <<: *backend-image
     command: uvicorn services.scheduler_service.app.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
     environment: *app_env
@@ -120,9 +118,7 @@ services:
       - migration-service
 
   notification-service:
-    build:
-      context: .
-      dockerfile: Dockerfile.service
+    <<: *backend-image
     command: uvicorn services.notification_service.app.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
     environment: *app_env
@@ -131,9 +127,7 @@ services:
       - migration-service
 
   group-service:
-    build:
-      context: .
-      dockerfile: Dockerfile.service
+    <<: *backend-image
     command: uvicorn services.group_service.app.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
     environment: *app_env
@@ -142,9 +136,7 @@ services:
       - migration-service
 
   chat-service:
-    build:
-      context: .
-      dockerfile: Dockerfile.service
+    <<: *backend-image
     command: uvicorn services.chat_service.app.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
     environment: *app_env
@@ -153,9 +145,7 @@ services:
       - migration-service
 
   gateway:
-    build:
-      context: .
-      dockerfile: Dockerfile.service
+    <<: *backend-image
     command: uvicorn services.gateway.app.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
     environment: *app_env

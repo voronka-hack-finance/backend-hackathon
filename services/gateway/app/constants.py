@@ -9,6 +9,7 @@ NOTIFICATION_QUEUE = "notification-service"
 ANALYTICS_QUEUE = "analytics-service"
 GROUP_QUEUE = "group-service"
 CHAT_QUEUE = "chat-service"
+HEALTH_SCORE_QUEUE = "health-score-service"
 
 PROTECTED_RESPONSES = {
     401: {"model": ErrorResponse, "description": "Отсутствует, просрочен или недействителен Bearer JWT."},
@@ -35,6 +36,7 @@ OPENAPI_TAGS = [
     {"name": "Categories", "description": "Пользовательские категории доходов и расходов."},
     {"name": "Notifications", "description": "Согласие на push, регистрация устройств FCM и тестовая отправка."},
     {"name": "Analytics", "description": "Доступный остаток, ожидаемые доходы и расходы на период."},
+    {"name": "Financial Health", "description": "Financial health and credit-load profile calculated from finance and analytics service data."},
     {"name": "Groups", "description": "Семейные группы, участники, приглашения и сводный бюджет."},
     {"name": "Chats", "description": "Рекомендации агентов, чаты и сообщения с ролями user/assistant/system."},
 ]
