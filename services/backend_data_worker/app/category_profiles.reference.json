@@ -1,0 +1,30 @@
+[
+  {
+    "category": "Фастфуд",
+    "categoryGroup": "food_outside",
+    "canOptimize": true,
+    "protectedByDefault": false,
+    "isRequiredExpense": false
+  },
+  {
+    "category": "Супермаркеты",
+    "categoryGroup": "food_grocery",
+    "canOptimize": true,
+    "protectedByDefault": false,
+    "isRequiredExpense": false
+  },
+  {
+    "category": "Зарплата",
+    "categoryGroup": "essential_fixed",
+    "canOptimize": false,
+    "protectedByDefault": true,
+    "isRequiredExpense": true
+  },
+  {
+    "category": "Транспорт",
+    "categoryGroup": "transport",
+    "canOptimize": true,
+    "protectedByDefault": false,
+    "isRequiredExpense": false
+  }
+]
