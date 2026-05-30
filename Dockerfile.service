@@ -40,6 +40,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 
 FROM base AS runtime
 
+COPY family-bugget.xlsx /app/family-bugget.xlsx
 COPY services /app/services
 
 CMD ["uvicorn", "services.gateway.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

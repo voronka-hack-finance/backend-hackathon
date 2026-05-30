@@ -1,10 +1,16 @@
+import logging
 import time
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
 
+from services.migration_service.app.bootstrap import run_bootstrap
 from services.migration_service.app.config import settings
+from services.migration_service.app.reset import reset_application_data
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
@@ -12,6 +18,8 @@ MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 def main() -> None:
     engine = _wait_for_postgres()
     _apply_migrations(engine)
+    reset_application_data(engine)
+    run_bootstrap(engine)
 
 
 def _wait_for_postgres():
