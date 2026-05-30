@@ -1,0 +1,40 @@
+[project]
+name = "family-budget-backend"
+version = "0.1.0"
+description = "Backend MVP for importing and querying personal finance transactions."
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "pydantic>=2.8.0",
+  "pydantic-settings>=2.4.0",
+  "SQLAlchemy>=2.0.30",
+  "psycopg[binary]>=3.2.0",
+  "python-multipart>=0.0.9",
+  "httpx>=0.27.0",
+  "PyJWT>=2.9.0",
+  "pika>=1.3.2",
+  "minio>=7.2.7",
+  "openpyxl>=3.1.5",
+  "redis>=5.0.8",
+  "email-validator>=2.2.0",
+  "firebase-admin>=6.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.23.8",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["libs/common"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "libs/common"]
+asyncio_mode = "auto"
