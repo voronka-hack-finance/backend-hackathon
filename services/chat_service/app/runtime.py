@@ -17,6 +17,30 @@ class Settings(BaseSettings):
         validation_alias="DATABASE_URL",
     )
     rabbitmq_url: str = Field(default="amqp://guest:guest@localhost:5672/%2F", validation_alias="RABBITMQ_URL")
+    rabbitmq_workflow_url: str = Field(
+        default="amqp://guest:guest@localhost:5672/%2F",
+        validation_alias="RABBITMQ_WORKFLOW_URL",
+    )
+    rabbitmq_workflow_queue: str = Field(
+        default="ai.workflow.tasks",
+        validation_alias="RABBITMQ_WORKFLOW_QUEUE",
+    )
+    ai_workflow_publish_enabled: bool = Field(default=True, validation_alias="AI_WORKFLOW_PUBLISH_ENABLED")
+    ai_workflow_default_timezone: str = Field(default="UTC", validation_alias="AI_WORKFLOW_DEFAULT_TIMEZONE")
+    ai_workflow_chat_context_messages: int = Field(default=6, validation_alias="AI_WORKFLOW_CHAT_CONTEXT_MESSAGES")
+    ai_workflow_outbox_flush_interval_seconds: float = Field(
+        default=5.0,
+        validation_alias="AI_WORKFLOW_OUTBOX_FLUSH_INTERVAL_SECONDS",
+    )
+    ai_workflow_outbox_max_attempts: int = Field(default=20, validation_alias="AI_WORKFLOW_OUTBOX_MAX_ATTEMPTS")
+    rabbitmq_workflow_result_queue: str = Field(
+        default="ai.workflow.results",
+        validation_alias="RABBITMQ_WORKFLOW_RESULT_QUEUE",
+    )
+    ai_workflow_result_consumer_enabled: bool = Field(
+        default=True,
+        validation_alias="AI_WORKFLOW_RESULT_CONSUMER_ENABLED",
+    )
 
     model_config = SettingsConfigDict(extra="ignore")
 

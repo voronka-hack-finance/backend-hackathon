@@ -46,12 +46,32 @@ def _mock_user_context() -> dict[str, Any]:
         "stableMonthlyIncome": 85000,
         "hasDebt": False,
         "monthlyDebtPayment": None,
-        "debtAmount": None,
+        "debtAmount": "0",
         "financialGoal": "Отпуск",
         "goalAmount": 150000,
         "goalDeadlineMonths": 8,
         "salaryDay": 5,
         "currentBalance": 52000,
+        "categoryLimits": [
+            {
+                "id": "limit_mock_1",
+                "account_id": None,
+                "category_id": "cat_mock_food",
+                "limit_amount": "10000.00",
+                "currency": "RUB",
+                "period_days": 30,
+                "is_active": True,
+            },
+            {
+                "id": "limit_mock_2",
+                "account_id": None,
+                "category_id": "cat_mock_transport",
+                "limit_amount": "5000.00",
+                "currency": "RUB",
+                "period_days": 30,
+                "is_active": True,
+            },
+        ],
     }
 
 

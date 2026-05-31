@@ -1,0 +1,24 @@
+{
+  "rabbit_version": "3.13.0",
+  "vhosts": [
+    {
+      "name": "/"
+    }
+  ],
+  "users": [
+    {
+      "name": "finance_ai",
+      "password": "finance_ai",
+      "tags": "management"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "finance_ai",
+      "vhost": "/",
+      "configure": "^ai\\..*$",
+      "write": "^ai\\..*$",
+      "read": "^ai\\..*$"
+    }
+  ]
+}

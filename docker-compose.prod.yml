@@ -35,6 +35,17 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     restart: unless-stopped
+    ports:
+      - "${RABBITMQ_EXTERNAL_BIND:-0.0.0.0}:${RABBITMQ_EXTERNAL_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   redis:
     image: redis:7-alpine
@@ -140,7 +151,14 @@ services:
     <<: *backend-image
     command: uvicorn services.chat_service.app.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
-    environment: *app_env
+    environment:
+      <<: *app_env
+      RABBITMQ_WORKFLOW_URL: ${RABBITMQ_WORKFLOW_URL:-amqp://finance_ai:finance_ai@rabbitmq:5672/}
+      RABBITMQ_WORKFLOW_QUEUE: ${RABBITMQ_WORKFLOW_QUEUE:-ai.workflow.tasks}
+      RABBITMQ_WORKFLOW_RESULT_QUEUE: ${RABBITMQ_WORKFLOW_RESULT_QUEUE:-ai.workflow.results}
+      AI_WORKFLOW_PUBLISH_ENABLED: ${AI_WORKFLOW_PUBLISH_ENABLED:-true}
+      AI_WORKFLOW_RESULT_CONSUMER_ENABLED: ${AI_WORKFLOW_RESULT_CONSUMER_ENABLED:-true}
+      AI_WORKFLOW_DEFAULT_TIMEZONE: ${AI_WORKFLOW_DEFAULT_TIMEZONE:-UTC}
     depends_on:
       - rabbitmq
       - migration-service

@@ -284,6 +284,173 @@ def test_processor_accepts_existing_financial_analysis_result_with_transactions(
     assert transactions_items_count(response.data) >= 1
 
 
+def test_processor_user_context_aggregates_debts_and_limits():
+    def handler(queue: str, message_type: str, payload: dict, *, user=None, timeout_seconds=30.0) -> dict:
+        if message_type == "accounts.list":
+            return {
+                "ok": True,
+                "payload": {
+                    "items": [{"current_balance": "52000.00"}],
+                    "pagination": {"page": 1, "page_size": 500, "total": 1},
+                },
+            }
+        if message_type == "goals.list":
+            return {
+                "ok": True,
+                "payload": {
+                    "items": [
+                        {
+                            "title": "Отпуск",
+                            "target_amount": "150000.00",
+                            "target_date": "2027-01-15",
+                            "status": "active",
+                        }
+                    ],
+                    "pagination": {"page": 1, "page_size": 500, "total": 1},
+                },
+            }
+        if message_type == "analytics.expected_incomes.list":
+            return {
+                "ok": True,
+                "payload": {
+                    "items": [{"expected_amount": "85000.00"}],
+                    "pagination": {"page": 1, "page_size": 500, "total": 1},
+                },
+            }
+        if message_type == "debts.list":
+            assert payload.get("status") == "active"
+            return {
+                "ok": True,
+                "payload": {
+                    "items": [
+                        {"remaining_balance": "80000.00", "monthly_payment": "10000.00"},
+                        {"remaining_balance": "40000.00", "monthly_payment": "5000.00"},
+                    ],
+                    "pagination": {"page": 1, "page_size": 500, "total": 2},
+                },
+            }
+        if message_type == "limits.list":
+            return {
+                "ok": True,
+                "payload": {
+                    "items": [
+                        {
+                            "id": "limit-1",
+                            "limit_amount": "10000.00",
+                            "category_id": "cat-1",
+                            "is_active": True,
+                        },
+                        {
+                            "id": "limit-2",
+                            "limit_amount": "5000.00",
+                            "category_id": "cat-2",
+                            "is_active": False,
+                        },
+                    ],
+                    "pagination": {"page": 1, "page_size": 500, "total": 2},
+                },
+            }
+        return {"ok": False, "status_code": 404, "error": f"unexpected {message_type}"}
+
+    bus = MagicMock()
+    bus.request.side_effect = handler
+    fetcher = RpcDataFetcher(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/%2F",
+        finance_queue="finance-service",
+        analytics_queue="analytics-service",
+        rpc_timeout_seconds=5,
+        bus=bus,
+    )
+    raw = _valid_request(data_types=["user_context"])
+    raw.pop("period", None)
+    raw.pop("comparison_period", None)
+    response = process_request_payload(raw, fetcher=fetcher)
+
+    context = response.data["user_context"]
+    assert context["hasDebt"] is True
+    assert context["debtAmount"] == "120000.00"
+    assert context["monthlyDebtPayment"] == "15000.00"
+    assert context["financialGoal"] == "Отпуск"
+    assert context["currentBalance"] == "52000.00"
+    assert len(context["categoryLimits"]) == 1
+    assert context["categoryLimits"][0]["id"] == "limit-1"
+    assert all(limit.get("is_active") for limit in context["categoryLimits"])
+    gap_errors = [error for error in response.errors if error.code == "USER_CONTEXT_GAPS"]
+    assert len(gap_errors) == 1
+    assert "hasDebt" not in gap_errors[0].message
+
+
+def test_processor_defaults_missing_period_to_six_months():
+    captured: list[dict[str, Any]] = []
+
+    def handler(queue: str, message_type: str, payload: dict, *, user=None, timeout_seconds=30.0) -> dict:
+        captured.append({"message_type": message_type, "payload": payload})
+        return {
+            "ok": True,
+            "payload": {
+                "items": [{"id": "tx-1", "type": "expense"}],
+                "pagination": {"page": 1, "page_size": 500, "total": 1},
+            },
+        }
+
+    bus = MagicMock()
+    bus.request.side_effect = handler
+    fetcher = RpcDataFetcher(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/%2F",
+        finance_queue="finance-service",
+        analytics_queue="analytics-service",
+        rpc_timeout_seconds=5,
+        bus=bus,
+    )
+    raw = _valid_request(data_types=["transactions"])
+    raw.pop("period")
+    raw.pop("transaction_filters")
+    response = process_request_payload(raw, fetcher=fetcher)
+
+    assert response.status == "success"
+    tx_call = captured[0]
+    assert tx_call["message_type"] == "transactions.list"
+    assert tx_call["payload"]["date_from"]
+    assert tx_call["payload"]["date_to"]
+    assert "categories" not in tx_call["payload"]
+
+
+def test_processor_strips_empty_category_filters():
+    captured: list[dict[str, Any]] = []
+
+    def handler(queue: str, message_type: str, payload: dict, *, user=None, timeout_seconds=30.0) -> dict:
+        captured.append(payload)
+        return {
+            "ok": True,
+            "payload": {"items": [{"id": "tx-1"}], "pagination": {"page": 1, "page_size": 500, "total": 1}},
+        }
+
+    bus = MagicMock()
+    bus.request.side_effect = handler
+    fetcher = RpcDataFetcher(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/%2F",
+        finance_queue="finance-service",
+        analytics_queue="analytics-service",
+        rpc_timeout_seconds=5,
+        bus=bus,
+    )
+    raw = _valid_request(
+        data_types=["transactions"],
+        transaction_filters={
+            "direction": "all",
+            "categories": ["", "  "],
+            "mcc": [],
+            "account_id": None,
+            "card_last4": None,
+        },
+    )
+    response = process_request_payload(raw, fetcher=fetcher)
+
+    assert response.status == "success"
+    assert "categories" not in captured[0]
+    assert "type" not in captured[0]
+
+
 def test_parse_request_rejects_only_unknown_data_types():
     raw = _valid_request(data_types=["totally_unknown_type"])
     raw.pop("period", None)

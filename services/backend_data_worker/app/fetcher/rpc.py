@@ -262,14 +262,18 @@ class RpcDataFetcher:
         accounts_items: list[dict[str, Any]] = []
         goals_items: list[dict[str, Any]] = []
         incomes_items: list[dict[str, Any]] = []
+        debts_items: list[dict[str, Any]] = []
+        limits_items: list[dict[str, Any]] = []
 
         tasks = {
             "accounts": (self._finance_queue, "accounts.list", {}),
             "goals": (self._finance_queue, "goals.list", {}),
             "incomes": (self._analytics_queue, "analytics.expected_incomes.list", {}),
+            "debts": (self._finance_queue, "debts.list", {"status": "active"}),
+            "limits": (self._finance_queue, "limits.list", {}),
         }
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=5) as executor:
             futures = {
                 executor.submit(self._fetch_paginated, queue, msg_type, user_id, payload): key
                 for key, (queue, msg_type, payload) in tasks.items()
@@ -294,31 +298,37 @@ class RpcDataFetcher:
                     accounts_items = items
                 elif key == "goals":
                     goals_items = items
+                elif key == "debts":
+                    debts_items = items
+                elif key == "limits":
+                    limits_items = items
                 else:
                     incomes_items = items
 
         current_balance = _sum_decimal_field(accounts_items, "current_balance")
         stable_income = _max_decimal_field(incomes_items, "expected_amount")
         active_goal = _first_active_goal(goals_items)
+        has_debt, debt_amount, monthly_debt_payment = _aggregate_debt_fields(debts_items)
 
         context: dict[str, Any] = {
             "currentSavings": None,
             "stableMonthlyIncome": stable_income,
-            "hasDebt": None,
-            "monthlyDebtPayment": None,
-            "debtAmount": None,
+            "hasDebt": has_debt,
+            "monthlyDebtPayment": monthly_debt_payment,
+            "debtAmount": debt_amount,
             "financialGoal": active_goal.get("title") if active_goal else None,
             "goalAmount": active_goal.get("target_amount") if active_goal else None,
             "goalDeadlineMonths": _goal_deadline_months(active_goal),
             "salaryDay": None,
             "currentBalance": current_balance,
+            "categoryLimits": _active_limits(limits_items),
         }
 
-        if context["currentSavings"] is None and context["salaryDay"] is None and context["hasDebt"] is None:
+        if context["currentSavings"] is None and context["salaryDay"] is None:
             errors.append(
                 ResponseError(
                     code="USER_CONTEXT_GAPS",
-                    message="currentSavings, hasDebt, salaryDay are not available in backend",
+                    message="currentSavings and salaryDay are not available in backend",
                 )
             )
 
@@ -387,6 +397,32 @@ def _max_decimal_field(items: list[dict[str, Any]], field: str) -> str | None:
     if not decimals:
         return None
     return format(max(decimals), "f")
+
+
+def _aggregate_debt_fields(
+    debt_items: list[dict[str, Any]],
+) -> tuple[bool, str | None, str | None]:
+    has_debt = False
+    for item in debt_items:
+        balance = _parse_decimal(item.get("remaining_balance"))
+        if balance is not None and balance > 0:
+            has_debt = True
+            break
+
+    debt_amount = _sum_decimal_field(debt_items, "remaining_balance")
+    if debt_amount is None:
+        debt_amount = "0"
+
+    monthly_debt_payment = _sum_decimal_field(
+        [item for item in debt_items if item.get("monthly_payment") is not None],
+        "monthly_payment",
+    )
+
+    return has_debt, debt_amount, monthly_debt_payment
+
+
+def _active_limits(limit_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [item for item in limit_items if item.get("is_active") is True]
 
 
 def _first_active_goal(items: list[dict[str, Any]]) -> dict[str, Any] | None:

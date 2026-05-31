@@ -1,25 +1,37 @@
 {
-  "_note": "NOT a single backend endpoint. Composite assembled by Context Builder from GET /accounts, GET /goals, GET /analytics/available-balance, GET /analytics/expected-incomes. Fields marked GAP have no backend source.",
+  "_note": "NOT a single backend endpoint. Composite assembled by backend_data_worker from accounts, goals, expected-incomes, debts, limits RPC calls. Fields marked GAP have no backend source.",
   "currentSavings": null,
   "stableMonthlyIncome": "85000.00",
-  "hasDebt": null,
-  "monthlyDebtPayment": null,
-  "debtAmount": null,
+  "hasDebt": false,
+  "monthlyDebtPayment": "15000.00",
+  "debtAmount": "120000.00",
   "financialGoal": "Отпуск",
   "goalAmount": "150000.00",
   "goalDeadlineMonths": 8,
-  "salaryDay": 5,
+  "salaryDay": null,
   "currentBalance": "52000.00",
+  "categoryLimits": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "account_id": null,
+      "category_id": "550e8400-e29b-41d4-a716-446655440002",
+      "limit_amount": "10000.00",
+      "currency": "RUB",
+      "period_days": 30,
+      "is_active": true
+    }
+  ],
   "_assembly_sources": {
     "currentBalance": "SUM(accounts[].current_balance) from GET /api/v1/accounts",
-    "stableMonthlyIncome": "MAX or AVG(expected_amount) from GET /api/v1/analytics/expected-incomes",
+    "stableMonthlyIncome": "MAX(expected_amount) from GET /api/v1/analytics/expected-incomes",
     "financialGoal": "goals[0].title from GET /api/v1/goals where status=active",
     "goalAmount": "goals[0].target_amount",
     "goalDeadlineMonths": "computed from goals[0].target_date minus today",
+    "hasDebt": "any active debt with remaining_balance > 0 from GET /api/v1/debts?status=active",
+    "debtAmount": "SUM(remaining_balance) for active debts",
+    "monthlyDebtPayment": "SUM(monthly_payment) for active debts where monthly_payment is set",
+    "categoryLimits": "GET /api/v1/limits items where is_active=true",
     "salaryDay": "GAP — not stored in backend",
-    "currentSavings": "GAP — not stored; could use goals[].current_amount sum",
-    "hasDebt": "GAP — debts entity missing",
-    "monthlyDebtPayment": "GAP",
-    "debtAmount": "GAP"
+    "currentSavings": "GAP — not stored; could use goals[].current_amount sum"
   }
 }

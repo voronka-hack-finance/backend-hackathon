@@ -14,6 +14,7 @@ from services.backend_data_worker.app.fetcher import get_fetcher
 from services.backend_data_worker.app.fetcher.base import DataFetcher
 from services.backend_data_worker.app.schemas import BackendDataResponse, ResponseError
 from services.backend_data_worker.app.config import settings
+from services.backend_data_worker.app.request_defaults import normalize_request
 from services.backend_data_worker.app.validator import (
     RequestValidationError,
     error_response,
@@ -128,6 +129,19 @@ def process_request_payload(
             code=user_error.code,
             message=user_error.message,
             data_types=request.data_types,
+        )
+
+    request, default_notes = normalize_request(
+        request,
+        default_period_months=settings.default_transaction_period_months,
+    )
+    if default_notes:
+        logger.info(
+            "backend_data_request_defaults correlation_id=%s notes=%s period=%s transaction_filters=%s",
+            request.correlation_id,
+            default_notes,
+            request.period.model_dump() if request.period else None,
+            request.transaction_filters.model_dump() if request.transaction_filters else None,
         )
 
     period_error = _validate_period_for_transactions(request.data_types, request.period)

@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     gateway_access_token: str = Field(default="", validation_alias="BACKEND_GATEWAY_ACCESS_TOKEN")
     gateway_http_timeout_seconds: float = Field(default=30.0, validation_alias="BACKEND_HTTP_TIMEOUT_SECONDS")
     gateway_page_size: int = Field(default=500, validation_alias="BACKEND_TRANSACTIONS_PAGE_SIZE")
+    default_transaction_period_months: int = Field(
+        default=6,
+        validation_alias="BACKEND_DEFAULT_TRANSACTION_PERIOD_MONTHS",
+    )
 
     model_config = SettingsConfigDict(extra="ignore")
 

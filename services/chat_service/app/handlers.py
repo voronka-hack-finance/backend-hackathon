@@ -11,7 +11,16 @@ from services.chat_service.app.runtime import (
     FINANCE_QUEUE,
     HEALTH_SCORE_QUEUE,
     bus,
+    settings,
 )
+from services.chat_service.app.workflow_outbox import (
+    build_workflow_task,
+    enqueue_workflow_task,
+    fetch_chat_context,
+    flush_outbox_message,
+)
+
+from common.agent_debug_log import agent_debug_log
 
 def handle_recommendations(payload: dict, envelope: dict) -> dict:
     trusted_user = require_user(envelope)
@@ -204,7 +213,8 @@ def handle_messages_list(payload: dict, envelope: dict) -> dict:
 
 
 def handle_messages_create(payload: dict, envelope: dict) -> dict:
-    user_id = UUID(require_user(envelope).id)
+    trusted_user = require_user(envelope)
+    user_id = UUID(trusted_user.id)
     chat_id = UUID(str(payload.get("chat_id")))
     content = str(payload.get("content") or "").strip()
     if not content:
@@ -212,6 +222,20 @@ def handle_messages_create(payload: dict, envelope: dict) -> dict:
     role = str(payload.get("role") or "user")
     if role not in {"user", "assistant", "system"}:
         raise MessageError(422, "role must be user, assistant, or system")
+    # region agent log
+    agent_debug_log(
+        hypothesis_id="A,E",
+        location="handlers.py:handle_messages_create:entry",
+        message="chat_messages.create received",
+        data={
+            "chat_id": str(chat_id),
+            "role": role,
+            "publish_enabled": settings.ai_workflow_publish_enabled,
+            "workflow_queue": settings.rabbitmq_workflow_queue,
+            "workflow_url_host": settings.rabbitmq_workflow_url.split("@")[-1][:80],
+        },
+    )
+    # endregion
     with engine.begin() as connection:
         _get_chat(connection, chat_id, user_id)
         row = connection.execute(
@@ -225,7 +249,58 @@ def handle_messages_create(payload: dict, envelope: dict) -> dict:
             {"chat_id": chat_id, "user_id": user_id, "role": role, "content": content},
         ).mappings().one()
         connection.execute(text("update chats set updated_at = now() where id = :chat_id"), {"chat_id": chat_id})
-    return _serialize(row)
+        if role == "user" and settings.ai_workflow_publish_enabled:
+            message_id = row["id"]
+            chat_context = fetch_chat_context(
+                connection,
+                chat_id=chat_id,
+                exclude_message_id=message_id,
+                limit=settings.ai_workflow_chat_context_messages,
+            )
+            task = build_workflow_task(
+                user_id=trusted_user.id,
+                chat_id=str(chat_id),
+                message_id=str(message_id),
+                raw_message=content,
+                timezone_name=settings.ai_workflow_default_timezone,
+                chat_context=chat_context,
+            )
+            enqueue_workflow_task(connection, message_id=message_id, task=task)
+            # region agent log
+            agent_debug_log(
+                hypothesis_id="B",
+                location="handlers.py:handle_messages_create:enqueued",
+                message="workflow task enqueued to outbox",
+                data={"message_id": str(message_id), "workflow_run_id": task.workflow_run_id},
+            )
+            # endregion
+    serialized = _serialize(row)
+    if role == "user" and settings.ai_workflow_publish_enabled:
+        flush_ok = flush_outbox_message(
+            engine,
+            message_id=serialized["id"],
+            rabbitmq_url=settings.rabbitmq_workflow_url,
+            queue_name=settings.rabbitmq_workflow_queue,
+            max_attempts=settings.ai_workflow_outbox_max_attempts,
+        )
+        # region agent log
+        agent_debug_log(
+            hypothesis_id="C,D",
+            location="handlers.py:handle_messages_create:flush",
+            message="flush_outbox_message finished",
+            data={"message_id": serialized["id"], "flush_ok": flush_ok},
+        )
+        # endregion
+    else:
+        # region agent log
+        agent_debug_log(
+            hypothesis_id="A",
+            location="handlers.py:handle_messages_create:skipped",
+            message="workflow publish skipped",
+            data={"role": role, "publish_enabled": settings.ai_workflow_publish_enabled},
+        )
+        # endregion
+    return serialized
 
 
 def _get_chat(connection, chat_id: UUID, user_id: UUID):
