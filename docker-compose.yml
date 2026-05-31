@@ -41,7 +41,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U app -d family_budget" ]
+      test: ["CMD-SHELL", "pg_isready -U app -d family_budget"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -58,7 +58,7 @@ services:
     volumes:
       - minio-data:/data
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -69,7 +69,7 @@ services:
       - "5673:5672"
       - "15673:15672"
     healthcheck:
-      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -79,7 +79,7 @@ services:
     ports:
       - "6379:6379"
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -232,6 +232,23 @@ services:
         condition: service_healthy
       migration-service:
         condition: service_completed_successfully
+
+  backend-data-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: uvicorn services.backend_data_worker.app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      <<: *app-env
+      AI_BACKEND_DATA_REQUEST_QUEUE: ai.backend.data.requests
+      AI_CONTEXT_BUILDER_RESPONSE_QUEUE: ai.context_builder.backend_data.responses
+      BACKEND_DATA_PROVIDER: rpc
+      FINANCE_SERVICE_QUEUE: finance-service
+      ANALYTICS_SERVICE_QUEUE: analytics-service
+      RPC_TIMEOUT_SECONDS: "25"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
       finance-service:
         condition: service_started
       analytics-service:
