@@ -132,6 +132,7 @@ _MOCK_BUILDERS = {
     "accounts": lambda request: _mock_accounts(request.user_id),
     "goals": lambda request: _mock_goals(request.user_id),
     "expected_incomes": lambda request: _mock_expected_incomes(request.user_id),
+    "existing_financial_analysis_result": lambda request: None,
 }
 
 

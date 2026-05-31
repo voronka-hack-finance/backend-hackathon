@@ -28,6 +28,8 @@ def empty_data_for_types(data_types: list[str]) -> dict[str, Any]:
             data[data_type] = []
         elif data_type == "user_context":
             data[data_type] = {}
+        elif data_type == "existing_financial_analysis_result":
+            data[data_type] = None
     return data
 
 

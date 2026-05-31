@@ -44,15 +44,36 @@ class RpcDataFetcher:
         filters_payload = _filters_to_payload(request.transaction_filters)
 
         if "transactions" in request.data_types:
-            items, err = self._fetch_transactions(request.user_id, request.period, filters_payload)
+            items, err, rpc_total = self._fetch_transactions(
+                request.user_id,
+                request.period,
+                filters_payload,
+            )
             dataset["transactions"] = {"items": items}
+            logger.info(
+                "rpc_transactions_fetched user_id=%s period=%s filters=%s rpc_items_len=%s rpc_total=%s rpc_error=%s",
+                request.user_id,
+                request.period.model_dump() if request.period else None,
+                filters_payload or None,
+                len(items),
+                rpc_total,
+                err.code if err else None,
+            )
             if err:
                 errors.append(err)
             elif not items:
+                period_label = (
+                    f"{request.period.start_date}..{request.period.end_date}"
+                    if request.period
+                    else "unknown"
+                )
                 errors.append(
                     ResponseError(
-                        code="TRANSACTIONS_EMPTY",
-                        message="No transactions found for the requested period and filters",
+                        code="NO_TRANSACTIONS",
+                        message=(
+                            f"Finance RPC returned 0 items for period {period_label} "
+                            f"with filters {filters_payload or {}}"
+                        ),
                     )
                 )
 
@@ -66,7 +87,7 @@ class RpcDataFetcher:
                 )
                 dataset["previous_period_transactions"] = {"items": []}
             else:
-                items, err = self._fetch_transactions(
+                items, err, _rpc_total = self._fetch_transactions(
                     request.user_id,
                     request.comparison_period,
                     filters_payload,
@@ -74,6 +95,19 @@ class RpcDataFetcher:
                 dataset["previous_period_transactions"] = {"items": items}
                 if err:
                     errors.append(err)
+                elif not items:
+                    period_label = (
+                        f"{request.comparison_period.start_date}..{request.comparison_period.end_date}"
+                    )
+                    errors.append(
+                        ResponseError(
+                            code="NO_TRANSACTIONS",
+                            message=(
+                                f"Finance RPC returned 0 items for comparison period {period_label} "
+                                f"with filters {filters_payload or {}}"
+                            ),
+                        )
+                    )
 
         if "accounts" in request.data_types:
             payload, err = self._fetch_paginated(self._finance_queue, "accounts.list", request.user_id, {})
@@ -118,6 +152,9 @@ class RpcDataFetcher:
                 )
             )
 
+        if "existing_financial_analysis_result" in request.data_types:
+            dataset["existing_financial_analysis_result"] = None
+
         return dataset, errors
 
     def _fetch_transactions(
@@ -125,9 +162,9 @@ class RpcDataFetcher:
         user_id: str,
         period: Period | None,
         filters_payload: dict[str, Any],
-    ) -> tuple[list[dict[str, Any]], ResponseError | None]:
+    ) -> tuple[list[dict[str, Any]], ResponseError | None, int | None]:
         if period is None:
-            return [], ResponseError(code="MISSING_PERIOD", message="period is required for transactions fetch")
+            return [], ResponseError(code="MISSING_PERIOD", message="period is required for transactions fetch"), None
         payload = {
             **filters_payload,
             "date_from": period.start_date,
@@ -135,8 +172,11 @@ class RpcDataFetcher:
         }
         result, err = self._fetch_paginated(self._finance_queue, "transactions.list", user_id, payload)
         if err:
-            return [], err
-        return result.get("items") or [], None
+            return [], err, None
+        items = result.get("items") or []
+        pagination = result.get("pagination") or {}
+        total = pagination.get("total")
+        return items, None, int(total) if total is not None else len(items)
 
     def _fetch_paginated(
         self,

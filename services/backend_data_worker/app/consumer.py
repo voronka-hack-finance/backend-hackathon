@@ -112,6 +112,14 @@ class AiBackendDataConsumer:
                                 if isinstance(tx_block, dict)
                                 else 0
                             )
+                            fetched_tx_count = int(response.fetch_stats.get("fetched_transactions_count") or mapped_tx_count)
+                            if fetched_tx_count > 0 and mapped_tx_count == 0:
+                                logger.error(
+                                    "backend_data_publish_mapping_bug correlation_id=%s fetched_transactions_count=%s mapped_transactions_count=%s",
+                                    response.correlation_id,
+                                    fetched_tx_count,
+                                    mapped_tx_count,
+                                )
                             body = json.dumps(
                                 publish_payload,
                                 ensure_ascii=False,
@@ -126,13 +134,16 @@ class AiBackendDataConsumer:
                                 ),
                                 routing_key=self.response_queue,
                             )
+                            error_codes = [error.code for error in response.errors]
                             logger.info(
-                                "backend_data_response_published correlation_id=%s status=%s mapped_transactions_count=%s response_queue=%s message_type=%s",
+                                "backend_data_response_published correlation_id=%s status=%s fetched_transactions_count=%s mapped_transactions_count=%s response_queue=%s message_type=%s error_codes=%s",
                                 response.correlation_id,
                                 response.status,
+                                fetched_tx_count,
                                 mapped_tx_count,
                                 self.response_queue,
                                 publish_payload.get("message_type"),
+                                error_codes,
                             )
         finally:
             with self._consumer_lock:

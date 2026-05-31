@@ -39,6 +39,8 @@ CRITICAL_ERROR_CODES = frozenset(
         "FINANCE_RPC_ERROR",
         "ANALYTICS_RPC_ERROR",
         "RPC_INVALID_PAYLOAD",
+        "GATEWAY_HTTP_ERROR",
+        "GATEWAY_INVALID_PAYLOAD",
     }
 )
 
@@ -138,7 +140,7 @@ def process_request_payload(
         )
 
     logger.info(
-        "backend_data_request_received correlation_id=%s request_id=%s user_id=%s chat_id=%s data_types=%s period=%s comparison_period=%s transaction_filters=%s data_provider=%s fetch_path=internal_rpc",
+        "backend_data_request_received correlation_id=%s request_id=%s user_id=%s chat_id=%s data_types=%s period=%s comparison_period=%s transaction_filters=%s data_provider=%s",
         request.correlation_id,
         request.request_id,
         request.user_id,
@@ -147,7 +149,7 @@ def process_request_payload(
         request.period.model_dump() if request.period else None,
         request.comparison_period.model_dump() if request.comparison_period else None,
         request.transaction_filters.model_dump() if request.transaction_filters else None,
-        (fetcher or get_fetcher()).__class__.__name__ if fetcher else settings.data_provider,
+        settings.data_provider,
     )
 
     data_fetcher = fetcher or get_fetcher()
@@ -156,19 +158,30 @@ def process_request_payload(
     response = assemble_response(request=request, dataset=dataset, status=status, errors=errors)
 
     duration_ms = int((time.monotonic() - started) * 1000)
-    rpc_errors = [error.code for error in errors]
+    fetch_errors = [error.code for error in errors]
+    fetched_count = transactions_items_count(dataset)
     mapped_count = transactions_items_count(response.data)
-    rpc_count = transactions_items_count(dataset)
+    response.fetch_stats = {
+        "fetched_transactions_count": fetched_count,
+        "mapped_transactions_count": mapped_count,
+    }
+    if fetched_count > 0 and mapped_count == 0:
+        logger.error(
+            "backend_data_mapping_bug correlation_id=%s fetched_transactions_count=%s mapped_transactions_count=%s",
+            request.correlation_id,
+            fetched_count,
+            mapped_count,
+        )
     logger.info(
-        "backend_data_response_built correlation_id=%s request_id=%s user_id=%s status=%s rpc_transactions_count=%s mapped_transactions_count=%s duration_ms=%s rpc_errors=%s",
+        "backend_data_response_built correlation_id=%s request_id=%s user_id=%s status=%s fetched_transactions_count=%s mapped_transactions_count=%s duration_ms=%s fetch_errors=%s",
         request.correlation_id,
         request.request_id,
         request.user_id,
         response.status,
-        rpc_count,
+        fetched_count,
         mapped_count,
         duration_ms,
-        rpc_errors,
+        fetch_errors,
     )
     return response
 

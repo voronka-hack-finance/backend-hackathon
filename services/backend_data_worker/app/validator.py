@@ -62,11 +62,14 @@ def parse_request_body(raw: dict[str, Any]) -> BackendDataRequest:
         )
     unknown = [item for item in request.data_types if item not in SUPPORTED_DATA_TYPES]
     if unknown:
-        raise RequestValidationError(
-            code="INVALID_REQUEST",
-            message=f"Unsupported data_types: {', '.join(unknown)}",
-            correlation_id=request.correlation_id,
-        )
+        supported_types = [item for item in request.data_types if item in SUPPORTED_DATA_TYPES]
+        if not supported_types:
+            raise RequestValidationError(
+                code="INVALID_REQUEST",
+                message=f"Unsupported data_types: {', '.join(unknown)}",
+                correlation_id=request.correlation_id,
+            )
+        request = request.model_copy(update={"data_types": supported_types})
     return request
 
 

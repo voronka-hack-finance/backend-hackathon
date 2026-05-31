@@ -25,6 +25,13 @@ class Settings(BaseSettings):
         validation_alias="ANALYTICS_SERVICE_QUEUE",
     )
     rpc_timeout_seconds: float = Field(default=25.0, validation_alias="RPC_TIMEOUT_SECONDS")
+    gateway_base_url: str = Field(
+        default="http://gateway:8000",
+        validation_alias="BACKEND_GATEWAY_BASE_URL",
+    )
+    gateway_access_token: str = Field(default="", validation_alias="BACKEND_GATEWAY_ACCESS_TOKEN")
+    gateway_http_timeout_seconds: float = Field(default=30.0, validation_alias="BACKEND_HTTP_TIMEOUT_SECONDS")
+    gateway_page_size: int = Field(default=500, validation_alias="BACKEND_TRANSACTIONS_PAGE_SIZE")
 
     model_config = SettingsConfigDict(extra="ignore")
 

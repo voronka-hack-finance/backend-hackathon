@@ -174,7 +174,7 @@ def test_processor_empty_transactions_partial():
 
     assert response.status == "partial"
     assert response.data["transactions"]["items"] == []
-    assert any(error.code == "TRANSACTIONS_EMPTY" for error in response.errors)
+    assert any(error.code == "NO_TRANSACTIONS" for error in response.errors)
 
 
 def test_processor_rpc_failure_error():
@@ -193,6 +193,103 @@ def test_processor_rpc_failure_error():
     assert response.status == "error"
     assert response.data["transactions"]["items"] == []
     assert any(error.code == "FINANCE_RPC_ERROR" for error in response.errors)
+
+
+def test_processor_gateway_maps_items_wrapper():
+    from services.backend_data_worker.app.fetcher.gateway import GatewayDataFetcher
+    from services.backend_data_worker.app.gateway_client import GatewayClient
+
+    class StubClient(GatewayClient):
+        def __init__(self) -> None:
+            pass
+
+        def get_paginated_items(self, path, *, params, request_user_id=None):
+            assert path == "/api/v1/transactions"
+            assert params["date_from"] == "2025-12-01T00:00:00.000Z"
+            assert params["date_to"] == "2026-05-30T23:59:59.999Z"
+            return [{"id": "tx-1"}], 590, None
+
+    fetcher = GatewayDataFetcher(gateway_client=StubClient())  # type: ignore[arg-type]
+    raw = _valid_request(
+        data_types=["transactions"],
+        period={"start_date": "2025-12-01", "end_date": "2026-05-30"},
+        transaction_filters=None,
+    )
+    raw.pop("transaction_filters")
+    response = process_request_payload(raw, fetcher=fetcher)
+
+    assert response.status == "success"
+    assert response.data["transactions"]["items"][0]["id"] == "tx-1"
+    assert response.fetch_stats["fetched_transactions_count"] == 1
+    assert response.fetch_stats["mapped_transactions_count"] == 1
+    published = response.to_publish_dict()
+    assert isinstance(published["data"]["transactions"]["items"], list)
+    assert "fetch_stats" not in published
+
+
+def test_processor_gateway_previous_period():
+    from services.backend_data_worker.app.fetcher.gateway import GatewayDataFetcher
+
+    calls: list[str] = []
+
+    class StubClient:
+        def get_paginated_items(self, path, *, params, request_user_id=None):
+            calls.append(params["date_from"])
+            return [{"id": calls[-1]}], 1, None
+
+    fetcher = GatewayDataFetcher(gateway_client=StubClient())  # type: ignore[arg-type]
+    raw = _valid_request(
+        data_types=["transactions", "previous_period_transactions"],
+        period={"start_date": "2025-12-01", "end_date": "2026-05-30"},
+        comparison_period={"start_date": "2025-06-03", "end_date": "2025-11-30"},
+        transaction_filters=None,
+    )
+    raw.pop("transaction_filters")
+    response = process_request_payload(raw, fetcher=fetcher)
+
+    assert response.status == "success"
+    assert len(response.data["transactions"]["items"]) == 1
+    assert len(response.data["previous_period_transactions"]["items"]) == 1
+    assert "2025-12-01T00:00:00.000Z" in calls
+    assert "2025-06-03T00:00:00.000Z" in calls
+
+
+def test_decode_jwt_user_id():
+    from services.backend_data_worker.app.gateway_client import decode_jwt_user_id
+
+    token = (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJzdWIiOiI0MzJlYWY1MS1hYTVlLTQ5OTQtOWRkYS04NjhjMmNiMWEwNTciLCJ1c2VyX2lkIjoiNDMyZW"
+        "FmNTEtYWE1ZS00OTk0LTlkZGEtODY4YzJjYjFhMDU3In0."
+        "signature"
+    )
+    assert decode_jwt_user_id(token) == "432eaf51-aa5e-4994-9dda-868c2cb1a057"
+
+
+def test_processor_accepts_existing_financial_analysis_result_with_transactions():
+    raw = _valid_request(
+        data_types=["existing_financial_analysis_result", "transactions"],
+        period={"start_date": "2025-12-01", "end_date": "2026-05-30"},
+        transaction_filters={
+            "direction": "expense",
+            "categories": [],
+            "mcc": [],
+            "account_id": None,
+            "card_last4": None,
+        },
+    )
+    response = process_request_payload(raw, fetcher=MockDataFetcher())
+    assert response.status in {"success", "partial"}
+    assert response.data["existing_financial_analysis_result"] is None
+    assert transactions_items_count(response.data) >= 1
+
+
+def test_parse_request_rejects_only_unknown_data_types():
+    raw = _valid_request(data_types=["totally_unknown_type"])
+    raw.pop("period", None)
+    with pytest.raises(RequestValidationError) as exc:
+        parse_request_body(raw)
+    assert exc.value.code == "INVALID_REQUEST"
 
 
 def _rabbitmq_available(host: str = "localhost", port: int = 5673) -> bool:

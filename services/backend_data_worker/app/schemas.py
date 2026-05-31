@@ -17,6 +17,7 @@ SUPPORTED_DATA_TYPES = frozenset(
         "accounts",
         "goals",
         "expected_incomes",
+        "existing_financial_analysis_result",
     }
 )
 MVP_FULL_MOCK_DATA_TYPES = frozenset(
@@ -69,6 +70,7 @@ class BackendDataResponse(BaseModel):
     status: Literal["success", "partial", "error"]
     data: dict[str, Any] = Field(default_factory=dict)
     errors: list[ResponseError] = Field(default_factory=list)
+    fetch_stats: dict[str, Any] = Field(default_factory=dict)
 
     def to_publish_dict(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude_none=True)
+        return self.model_dump(mode="json", exclude_none=True, exclude={"fetch_stats"})
