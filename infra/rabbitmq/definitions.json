@@ -7,12 +7,24 @@
   ],
   "users": [
     {
+      "name": "guest",
+      "password": "guest",
+      "tags": "administrator"
+    },
+    {
       "name": "finance_ai",
       "password": "finance_ai",
       "tags": "management"
     }
   ],
   "permissions": [
+    {
+      "user": "guest",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
     {
       "user": "finance_ai",
       "vhost": "/",
