@@ -133,8 +133,22 @@ def test_build_demo_chat_mocks_has_five_realistic_ml_dialogs():
     for spec in specs:
         messages = spec["messages"]
         assert messages
+        assert spec["agent_key"]
+        assert spec["confidence"]
         assert messages[0]["role"] == "user"
         assert any(message["role"] == "assistant" for message in messages)
         assert all(message["content"].strip() for message in messages)
         assert all(message["offset_minutes"] >= 0 for message in messages)
         assert messages == sorted(messages, key=lambda item: item["offset_minutes"])
+
+
+def test_build_demo_recommendation_mocks_match_chat_openers():
+    chat_specs = bootstrap.build_demo_chat_mocks()
+    recommendations = bootstrap.build_demo_recommendation_mocks()
+    assert len(recommendations) == 5
+    assert [item["title"] for item in recommendations] == [item["title"] for item in chat_specs]
+    assert [item["agent_key"] for item in recommendations] == [item["agent_key"] for item in chat_specs]
+    for recommendation, chat in zip(recommendations, chat_specs, strict=True):
+        first_user = next(message for message in chat["messages"] if message["role"] == "user")
+        assert recommendation["content"] == first_user["content"]
+        assert recommendation["confidence"] == chat["confidence"]

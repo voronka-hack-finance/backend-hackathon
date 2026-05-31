@@ -189,6 +189,8 @@ def build_demo_chat_mocks() -> list[dict[str, Any]]:
     return [
         {
             "title": "Расходы на еду",
+            "agent_key": "expense-analysis",
+            "confidence": "0.8600",
             "base_offset_days": 0,
             "messages": [
                 {
@@ -224,6 +226,8 @@ def build_demo_chat_mocks() -> list[dict[str, Any]]:
         },
         {
             "title": "Цель «Отпуск»",
+            "agent_key": "goals",
+            "confidence": "0.9100",
             "base_offset_days": 2,
             "messages": [
                 {
@@ -244,6 +248,8 @@ def build_demo_chat_mocks() -> list[dict[str, Any]]:
         },
         {
             "title": "Бюджет на выходные",
+            "agent_key": "available-funds",
+            "confidence": "0.8800",
             "base_offset_days": 5,
             "messages": [
                 {
@@ -278,6 +284,8 @@ def build_demo_chat_mocks() -> list[dict[str, Any]]:
         },
         {
             "title": "Где сократить траты",
+            "agent_key": "expense-optimization",
+            "confidence": "0.8400",
             "base_offset_days": 8,
             "messages": [
                 {
@@ -299,6 +307,8 @@ def build_demo_chat_mocks() -> list[dict[str, Any]]:
         },
         {
             "title": "Покупка ноутбука",
+            "agent_key": "large-purchase",
+            "confidence": "0.8200",
             "base_offset_days": 11,
             "messages": [
                 {
@@ -338,9 +348,25 @@ def build_demo_chat_mocks() -> list[dict[str, Any]]:
     ]
 
 
+def build_demo_recommendation_mocks() -> list[dict[str, Any]]:
+    recommendations: list[dict[str, Any]] = []
+    for spec in build_demo_chat_mocks():
+        first_user_message = next(message for message in spec["messages"] if message["role"] == "user")
+        recommendations.append(
+            {
+                "agent_key": spec["agent_key"],
+                "title": spec["title"],
+                "content": first_user_message["content"],
+                "confidence": spec["confidence"],
+            }
+        )
+    return recommendations
+
+
 def _seed_demo_chats(engine: Engine, user_id: UUID) -> None:
     specs = build_demo_chat_mocks()
     message_count = 0
+    recommendation_count = 0
     for spec in specs:
         chat_id = uuid4()
         chat_base = DEMO_CHATS_BASE_AT + timedelta(days=spec["base_offset_days"])
@@ -349,6 +375,7 @@ def _seed_demo_chats(engine: Engine, user_id: UUID) -> None:
         ]
         created_at = timestamps[0]
         updated_at = timestamps[-1]
+        first_user_message = next(message for message in spec["messages"] if message["role"] == "user")
         with engine.begin() as conn:
             conn.execute(
                 text(
@@ -365,6 +392,26 @@ def _seed_demo_chats(engine: Engine, user_id: UUID) -> None:
                     "updated_at": updated_at,
                 },
             )
+            conn.execute(
+                text(
+                    """
+                    insert into agent_recommendations(
+                      user_id, chat_id, agent_key, title, content, confidence, created_at
+                    )
+                    values (:user_id, :chat_id, :agent_key, :title, :content, :confidence, :created_at)
+                    """
+                ),
+                {
+                    "user_id": user_id,
+                    "chat_id": chat_id,
+                    "agent_key": spec["agent_key"],
+                    "title": spec["title"],
+                    "content": first_user_message["content"],
+                    "confidence": spec["confidence"],
+                    "created_at": created_at,
+                },
+            )
+            recommendation_count += 1
             for message, created_at in zip(spec["messages"], timestamps, strict=True):
                 conn.execute(
                     text(
@@ -383,8 +430,9 @@ def _seed_demo_chats(engine: Engine, user_id: UUID) -> None:
                 )
                 message_count += 1
     logger.info(
-        "Demo chats seeded: %s chats with %s messages for user %s",
+        "Demo chats seeded: %s chats, %s recommendations and %s messages for user %s",
         len(specs),
+        recommendation_count,
         message_count,
         user_id,
     )
