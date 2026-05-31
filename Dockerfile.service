@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DEFAULT_TIMEOUT=120
 
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-ARG PIP_FALLBACK_INDEX_URL=https://pypi.org/simple
+ARG PIP_FALLBACK_INDEX_URL=
 ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 
 WORKDIR /app
@@ -19,21 +19,27 @@ RUN apt-get update \
 COPY pyproject.toml README.md /app/
 COPY libs /app/libs
 
-RUN python -m pip install --no-cache-dir --upgrade pip \
+# Use only PIP_INDEX_URL by default. Extra index (pypi.org) makes pip query a slow/unreachable
+# host on many servers and causes ReadTimeoutError even when the primary mirror works.
+RUN set -eux; \
+    pip_extra=""; \
+    if [ -n "${PIP_FALLBACK_INDEX_URL}" ]; then \
+      pip_extra="--extra-index-url ${PIP_FALLBACK_INDEX_URL} --trusted-host pypi.org"; \
+    fi; \
+    python -m pip install --no-cache-dir --upgrade pip \
         --index-url "${PIP_INDEX_URL}" \
         --trusted-host "${PIP_TRUSTED_HOST}" \
+        ${pip_extra} \
         --timeout 120 --retries 10 \
     && python -m pip install --no-cache-dir "setuptools>=69" wheel \
         --index-url "${PIP_INDEX_URL}" \
-        --extra-index-url "${PIP_FALLBACK_INDEX_URL}" \
         --trusted-host "${PIP_TRUSTED_HOST}" \
-        --trusted-host pypi.org \
+        ${pip_extra} \
         --timeout 120 --retries 10 \
     && python -m pip install --no-cache-dir \
         --index-url "${PIP_INDEX_URL}" \
-        --extra-index-url "${PIP_FALLBACK_INDEX_URL}" \
         --trusted-host "${PIP_TRUSTED_HOST}" \
-        --trusted-host pypi.org \
+        ${pip_extra} \
         --timeout 120 --retries 10 \
         --no-build-isolation \
         .

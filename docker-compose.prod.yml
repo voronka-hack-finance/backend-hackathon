@@ -4,7 +4,7 @@ x-backend-build: &backend-build
   target: runtime
   args:
     PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
-    PIP_FALLBACK_INDEX_URL: ${PIP_FALLBACK_INDEX_URL:-https://pypi.org/simple}
+    PIP_FALLBACK_INDEX_URL: ${PIP_FALLBACK_INDEX_URL:-}
     PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
 
 x-backend-image: &backend-image
