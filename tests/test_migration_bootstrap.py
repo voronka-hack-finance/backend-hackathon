@@ -124,3 +124,17 @@ def test_build_sber_demo_transactions_has_four_realistic_items():
     assert items[2]["description"] == "Яндекс Go"
     assert items[3]["description"] == "OZON.RU"
     assert len({item["dedupe_key"] for item in items}) == 4
+
+
+def test_build_demo_chat_mocks_has_five_realistic_ml_dialogs():
+    specs = bootstrap.build_demo_chat_mocks()
+    assert len(specs) == 5
+    assert len({spec["title"] for spec in specs}) == 5
+    for spec in specs:
+        messages = spec["messages"]
+        assert messages
+        assert messages[0]["role"] == "user"
+        assert any(message["role"] == "assistant" for message in messages)
+        assert all(message["content"].strip() for message in messages)
+        assert all(message["offset_minutes"] >= 0 for message in messages)
+        assert messages == sorted(messages, key=lambda item: item["offset_minutes"])

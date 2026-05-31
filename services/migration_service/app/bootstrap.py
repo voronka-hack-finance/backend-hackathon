@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -36,6 +36,7 @@ SBER_DEMO_CARD_LAST4 = "8336"
 SBER_DEMO_CARD_MASK = "*8336"
 SBER_DEMO_DISPLAY_NAME = "Сбер ••8336"
 SBER_DEMO_LIVE_SHEET = "СБЕР_live"
+DEMO_CHATS_BASE_AT = datetime(2026, 5, 15, 9, 0, tzinfo=UTC)
 
 _parser = FamilyBudgetExcelParser()
 
@@ -132,6 +133,7 @@ def _import_workbook(engine: Engine, path: Path, file_bytes: bytes) -> int:
         file_id=file_id,
         import_id=import_id,
     )
+    _seed_demo_chats(engine, user_id)
     return inserted + demo_inserted
 
 
@@ -181,6 +183,211 @@ def _ensure_sber_demo_account(envelope: dict) -> dict:
             envelope,
         )
     return account
+
+
+def build_demo_chat_mocks() -> list[dict[str, Any]]:
+    return [
+        {
+            "title": "Расходы на еду",
+            "base_offset_days": 0,
+            "messages": [
+                {
+                    "role": "user",
+                    "offset_minutes": 0,
+                    "content": "Сколько я трачу на еду в месяц? Кажется, слишком много.",
+                },
+                {
+                    "role": "assistant",
+                    "offset_minutes": 2,
+                    "content": (
+                        "За последние 30 дней расходы на продукты и питание вне дома — около 18 400 ₽. "
+                        "Супермаркеты (Пятёрочка и др.) — 11 200 ₽, доставка и кафе — 7 200 ₽. "
+                        "Это примерно 22% от вашего дохода 85 000 ₽ — в пределах нормы, "
+                        "но доставка выросла на 15% к прошлому месяцу."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "offset_minutes": 5,
+                    "content": "А если убрать доставку и кафе?",
+                },
+                {
+                    "role": "assistant",
+                    "offset_minutes": 7,
+                    "content": (
+                        "Без доставки и кафе расходы на еду снизятся примерно до 11 200 ₽ в месяц — "
+                        "экономия около 7 200 ₽. Если направить половину в цель «Отпуск», "
+                        "накопите дополнительные 3 600 ₽ ежемесячно."
+                    ),
+                },
+            ],
+        },
+        {
+            "title": "Цель «Отпуск»",
+            "base_offset_days": 2,
+            "messages": [
+                {
+                    "role": "user",
+                    "offset_minutes": 0,
+                    "content": "Когда я смогу накопить на отпуск?",
+                },
+                {
+                    "role": "assistant",
+                    "offset_minutes": 2,
+                    "content": (
+                        "Цель «Отпуск» — 150 000 ₽, уже отложено 45 000 ₽ (30%). "
+                        "При текущем темпе около 12 500 ₽ в месяц до цели останется примерно 8 месяцев. "
+                        "Если откладывать 15 000 ₽ с каждой зарплаты, уложитесь к декабрю 2026 года."
+                    ),
+                },
+            ],
+        },
+        {
+            "title": "Бюджет на выходные",
+            "base_offset_days": 5,
+            "messages": [
+                {
+                    "role": "user",
+                    "offset_minutes": 0,
+                    "content": "Сколько могу потратить в эти выходные, не залезая в цель?",
+                },
+                {
+                    "role": "assistant",
+                    "offset_minutes": 2,
+                    "content": (
+                        "Прогнозный баланс после обязательных расходов — около 14 800 ₽. "
+                        "С учётом резерва на цель «Отпуск» рекомендую лимит 8 000–10 000 ₽ "
+                        "на развлечения и спонтанные покупки до понедельника."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "offset_minutes": 4,
+                    "content": "Ок, а если захочу сходить в кино и поужинать?",
+                },
+                {
+                    "role": "assistant",
+                    "offset_minutes": 6,
+                    "content": (
+                        "Кино на двоих и ужин вне дома обычно укладываются в 4 500–6 000 ₽. "
+                        "Это комфортно укладывается в рекомендованный лимит, "
+                        "если не планируете крупных покупок на маркетплейсах."
+                    ),
+                },
+            ],
+        },
+        {
+            "title": "Где сократить траты",
+            "base_offset_days": 8,
+            "messages": [
+                {
+                    "role": "user",
+                    "offset_minutes": 0,
+                    "content": "Где можно сократить траты без особого дискомфорта?",
+                },
+                {
+                    "role": "assistant",
+                    "offset_minutes": 2,
+                    "content": (
+                        "Три зоны с быстрым эффектом: маркетплейсы (OZON около 4 200 ₽ в месяц) — "
+                        "отложенные покупки; подписки Яндекс Плюс и музыка — 798 ₽; "
+                        "такси в будни вместо метро — около 2 800 ₽. "
+                        "Перенос 2–3 заказов и четырёх поездок на транспорт даст примерно 3 500 ₽ в месяц."
+                    ),
+                },
+            ],
+        },
+        {
+            "title": "Покупка ноутбука",
+            "base_offset_days": 11,
+            "messages": [
+                {
+                    "role": "user",
+                    "offset_minutes": 0,
+                    "content": "Хочу ноутбук за 95 000 ₽. Как лучше накопить?",
+                },
+                {
+                    "role": "assistant",
+                    "offset_minutes": 2,
+                    "content": (
+                        "При балансе около 52 000 ₽ и активной цели «Отпуск» одновременное накопление "
+                        "на две крупные цели рискованно. Варианты: (1) отложить покупку на 3 месяца "
+                        "и копить 20 000 ₽ в месяц с карты Сбер ••8336; (2) рассрочка 0% "
+                        "с платежом около 15 800 ₽ в месяц — тогда сократите развлечения на 5 000 ₽. "
+                        "Без рассрочки к концу августа наберёте сумму, не трогая цель отпуска, "
+                        "если откладываете 18 000 ₽ ежемесячно."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "offset_minutes": 6,
+                    "content": "Рассрочку не хочу. Сколько откладывать, чтобы не сдвинуть отпуск?",
+                },
+                {
+                    "role": "assistant",
+                    "offset_minutes": 8,
+                    "content": (
+                        "Чтобы купить ноутбук к концу августа и сохранить темп по «Отпуску», "
+                        "откладывайте 18 000 ₽ в месяц: 12 500 ₽ на цель и 5 500 ₽ сверх текущего темпа "
+                        "на ноутбук. После покупки вернитесь к прежнему взносу 12 500 ₽ — "
+                        "срок отпуска сдвинется не более чем на 3 недели."
+                    ),
+                },
+            ],
+        },
+    ]
+
+
+def _seed_demo_chats(engine: Engine, user_id: UUID) -> None:
+    specs = build_demo_chat_mocks()
+    message_count = 0
+    for spec in specs:
+        chat_id = uuid4()
+        chat_base = DEMO_CHATS_BASE_AT + timedelta(days=spec["base_offset_days"])
+        timestamps = [
+            chat_base + timedelta(minutes=message["offset_minutes"]) for message in spec["messages"]
+        ]
+        created_at = timestamps[0]
+        updated_at = timestamps[-1]
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    insert into chats(id, user_id, title, status, created_at, updated_at)
+                    values (:id, :user_id, :title, 'active', :created_at, :updated_at)
+                    """
+                ),
+                {
+                    "id": chat_id,
+                    "user_id": user_id,
+                    "title": spec["title"],
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                },
+            )
+            for message, created_at in zip(spec["messages"], timestamps, strict=True):
+                conn.execute(
+                    text(
+                        """
+                        insert into chat_messages(chat_id, user_id, role, content, created_at)
+                        values (:chat_id, :user_id, :role, :content, :created_at)
+                        """
+                    ),
+                    {
+                        "chat_id": chat_id,
+                        "user_id": user_id,
+                        "role": message["role"],
+                        "content": message["content"],
+                        "created_at": created_at,
+                    },
+                )
+                message_count += 1
+    logger.info(
+        "Demo chats seeded: %s chats with %s messages for user %s",
+        len(specs),
+        message_count,
+        user_id,
+    )
 
 
 def build_sber_demo_transactions(
