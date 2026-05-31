@@ -207,6 +207,10 @@ class CategoryResponse(BaseModel):
     is_archived: bool
     created_at: datetime
     updated_at: datetime
+    source: Literal["manual", "import"] = Field(
+        default="manual",
+        description="manual — created in app; import — distinct category_name from transactions.",
+    )
 
 
 class CategoryCreateRequest(BaseModel):
@@ -404,6 +408,81 @@ class ExpectedIncomesPageResponse(BaseModel):
 
 class ExpectedExpensesPageResponse(BaseModel):
     items: list[ExpectedExpenseResponse] = Field(description="Expected or derived expenses.")
+    pagination: PaginationResponse
+
+
+class RegularExpenseResponse(BaseModel):
+    id: UUID = Field(description="Regular expense identifier.")
+    account_id: UUID | None = Field(default=None, description="Linked account id. If null, analytics-service assigns one existing account owned by the user.")
+    category_id: UUID | None = Field(default=None, description="Linked category id. If null, analytics-service uses or creates the user's 'Другое' category.")
+    merchant_pattern: str = Field(description="Merchant or payment pattern, for example Netflix, rent, or utilities.")
+    average_amount: str = Field(description="Detected or fallback average amount as a decimal string.")
+    expected_amount: str | None = Field(default=None, description="User-facing planned amount as a decimal string.")
+    currency: str = Field(description="Expense currency.")
+    frequency_days: int = Field(description="Expected recurrence frequency in days.")
+    next_expected_at: datetime | None = Field(default=None, description="Next expected charge timestamp.")
+    confidence: str = Field(description="Detection confidence as a decimal string.")
+    status: str = Field(description="Record status, usually active, paused, or deleted.")
+    source_type: str = Field(description="Record source: detected, manual, or user_adjusted.")
+    created_at: datetime = Field(description="Creation timestamp.")
+    updated_at: datetime = Field(description="Last update timestamp.")
+
+
+class RegularExpenseCreateRequest(BaseModel):
+    merchant_pattern: str = Field(description="Merchant or payment pattern, for example Netflix, rent, or utilities.")
+    expected_amount: str = Field(description="User-facing planned amount as a decimal string.")
+    average_amount: str | None = Field(default=None, description="Optional detected average amount as a decimal string.")
+    account_id: UUID | None = Field(default=None, description="Optional linked account.")
+    category_id: UUID | None = Field(default=None, description="Optional linked category.")
+    currency: str = Field(default="RUB", description="Expense currency.")
+    frequency_days: int = Field(default=30, ge=1, description="Expected recurrence frequency in days.")
+    next_expected_at: datetime | None = Field(default=None, description="Next expected charge timestamp.")
+    status: str = Field(default="active", description="Initial record status.")
+    source_type: Literal["manual", "detected", "user_adjusted"] = Field(default="manual", description="Record source.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "merchant_pattern": "Apartment rent",
+                "expected_amount": "45000.00",
+                "account_id": None,
+                "category_id": None,
+                "currency": "RUB",
+                "frequency_days": 30,
+                "next_expected_at": "2026-06-05T09:00:00+00:00",
+                "status": "active",
+                "source_type": "manual",
+            }
+        }
+    }
+
+
+class RegularExpenseUpdateRequest(BaseModel):
+    merchant_pattern: str | None = Field(default=None, description="Merchant or payment pattern.")
+    expected_amount: str | None = Field(default=None, description="User-facing planned amount as a decimal string.")
+    average_amount: str | None = Field(default=None, description="Detected average amount as a decimal string.")
+    account_id: UUID | None = Field(default=None, description="Linked account id. If explicitly set to null, analytics-service assigns one existing account owned by the user.")
+    category_id: UUID | None = Field(default=None, description="Linked category id. If explicitly set to null, analytics-service uses or creates the user's 'Другое' category.")
+    currency: str | None = Field(default=None, description="Expense currency.")
+    frequency_days: int | None = Field(default=None, ge=1, description="Expected recurrence frequency in days.")
+    next_expected_at: datetime | None = Field(default=None, description="Next expected charge timestamp.")
+    status: str | None = Field(default=None, description="Record status, usually active, paused, or deleted.")
+    source_type: Literal["manual", "detected", "user_adjusted"] | None = Field(default=None, description="Record source.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "expected_amount": "47000.00",
+                "account_id": None,
+                "category_id": None,
+                "status": "paused",
+            }
+        }
+    }
+
+
+class RegularExpensesPageResponse(BaseModel):
+    items: list[RegularExpenseResponse] = Field(description="Regular expenses owned by the current user.")
     pagination: PaginationResponse
 
 

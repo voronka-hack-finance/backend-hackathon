@@ -1,5 +1,6 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 from services.migration_service.app import bootstrap
 from services.migration_service.app.config import Settings
@@ -55,3 +56,26 @@ def test_parser_reads_sample_file_for_bootstrap_contract():
     assert result.total_rows == 2728
     assert len(result.transactions) == 2728
     assert result.errors == []
+
+
+def test_build_sber_demo_transactions_has_four_realistic_items():
+    account_id = uuid4()
+    import_id = uuid4()
+    file_id = uuid4()
+    items = bootstrap.build_sber_demo_transactions(
+        account_id=account_id,
+        import_id=import_id,
+        source_file_id=file_id,
+    )
+    assert len(items) == 4
+    assert {item["type"] for item in items} == {"income", "expense"}
+    assert sum(1 for item in items if item["type"] == "income") == 1
+    assert all(item["account_id"] == str(account_id) for item in items)
+    assert all(item["card_last4"] == bootstrap.SBER_DEMO_CARD_LAST4 for item in items)
+    assert all(item["source_sheet"] == bootstrap.SBER_DEMO_LIVE_SHEET for item in items)
+    assert all(item["status"] == "OK" for item in items)
+    assert items[0]["category_name"] == "Зарплата"
+    assert items[1]["description"] == "Пятёрочка"
+    assert items[2]["description"] == "Яндекс Go"
+    assert items[3]["description"] == "OZON.RU"
+    assert len({item["dedupe_key"] for item in items}) == 4

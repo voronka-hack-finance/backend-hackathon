@@ -293,6 +293,11 @@ Finance analysis service.
 
 Approved public endpoints through gateway:
 
+- `GET /api/v1/analytics/regular-expenses`;
+- `POST /api/v1/analytics/regular-expenses`;
+- `GET /api/v1/analytics/regular-expenses/{regular_expense_id}`;
+- `PATCH /api/v1/analytics/regular-expenses/{regular_expense_id}`;
+- `DELETE /api/v1/analytics/regular-expenses/{regular_expense_id}`;
 - `GET /api/v1/analytics/available-balance`;
 - `GET /api/v1/analytics/expected-incomes`;
 - `GET /api/v1/analytics/expected-expenses`.
@@ -300,6 +305,8 @@ Approved public endpoints through gateway:
 Responsibilities:
 
 - detects regular user expenses;
+- stores and manages regular payment records manually created by the user, for example subscriptions, rent, utilities, or other planned recurring charges;
+- lets the user correct or disable automatically detected regular payments without editing source transactions;
 - estimates user income;
 - calculates available funds for a period after regular expenses;
 - excludes irregular and impulsive purchases from available-funds estimate;
@@ -309,7 +316,7 @@ Responsibilities:
 
 Owns data:
 
-- regular expense detections;
+- regular payment records: detected regular expenses and manually maintained recurring charges;
 - expected income records;
 - expected expense records;
 - available funds snapshots/results.
@@ -425,7 +432,7 @@ Explicitly **not** available in the current backend (must not be invented):
 - `category_expenses`, `category_share`, `category_overspend`, `category_overspend_percent` (when `category_limits` exist);
 - `unclear_expenses`, `clarity_score` — bank categories `Переводы`, `Наличные`, plus expenses with empty `category_name`;
 - `optional_expenses` — static MVP mapping aligned with formulas doc: `Рестораны`, `Фастфуд`, `Маркетплейсы`, `Подписки` (matched by `category_name` case-insensitive);
-- `fixed_expenses` — sum of `regular_expenses.average_amount` where status `active` (proxy for `is_fixed`);
+- `fixed_expenses` — sum of `COALESCE(regular_expenses.expected_amount, regular_expenses.average_amount)` where status `active` (manual planned amount first, detected average as fallback; proxy for `is_fixed`);
 - `variable_expenses` — `total_expenses - fixed_expenses`;
 - `saving_potential_soft/normal/hard` — from `optional_expenses`;
 - `average_daily_expense`, `forecast_expenses`, `forecast_balance`, `safe_daily_budget` — use `expected_incomes` / `expected_expenses` when present, otherwise current-month run-rate;
@@ -565,6 +572,10 @@ Message names are draft contracts and may be renamed before implementation.
 
 - `analytics.regular_expenses.detect`;
 - `analytics.regular_expenses.list` (needed by `health-score-service` for `fixed_expenses`);
+- `analytics.regular_expenses.get`;
+- `analytics.regular_expenses.create`;
+- `analytics.regular_expenses.update`;
+- `analytics.regular_expenses.delete`;
 - `analytics.expected_incomes.list`;
 - `analytics.expected_expenses.list`;
 - `analytics.available_balance.get`;
@@ -662,9 +673,14 @@ POST /api/v1/notifications/test
 ### Analytics
 
 ```text
-GET /api/v1/analytics/available-balance
-GET /api/v1/analytics/expected-incomes
-GET /api/v1/analytics/expected-expenses
+GET    /api/v1/analytics/regular-expenses
+POST   /api/v1/analytics/regular-expenses
+GET    /api/v1/analytics/regular-expenses/{regular_expense_id}
+PATCH  /api/v1/analytics/regular-expenses/{regular_expense_id}
+DELETE /api/v1/analytics/regular-expenses/{regular_expense_id}
+GET    /api/v1/analytics/available-balance
+GET    /api/v1/analytics/expected-incomes
+GET    /api/v1/analytics/expected-expenses
 ```
 
 ### Groups
@@ -734,7 +750,7 @@ Primary ownership:
 | accounts, transactions, goals, limits, categories | finance-service |
 | reminder plans and warning schedules | scheduler-service |
 | devices, notification preferences, delivery log | notification-service |
-| regular expenses, expected income/expense, available funds | analytics-service |
+| regular payment records, expected income/expense, available funds | analytics-service |
 | family groups, members, invitations | group-service |
 | chats, messages, agent recommendations | chat-service |
 | health score snapshots | health-score-service |
@@ -803,7 +819,7 @@ Rules:
 7. `file-service` upload metadata, MinIO storage, import jobs, parser.
 8. `finance-service` account/transaction/category/limit/goal models and reads.
 9. Import flow: file parser creates/reuses accounts and inserts non-duplicate transactions.
-10. `analytics-service` regular expenses, expected income/expense, available funds.
+10. `analytics-service` regular payment CRUD, regular expense detection, expected income/expense, available funds.
 11. `health-score-service` metric engine, snapshots, profile/score endpoints; consumes finance + analytics via RabbitMQ only.
 12. `scheduler-service` reminder and limit-warning planning.
 13. `notification-service` device storage and Firebase test/send path.
@@ -849,8 +865,15 @@ Rules:
 - Trade-off: service orchestrates many RabbitMQ reads per profile; snapshots + Redis cache required for acceptable latency.
 - Data constraint: credit metrics use transaction-category proxy only until a future `debts` entity is approved; partial index is explicit in API responses.
 
+### Manual regular payments in analytics-service
+
+- Chosen: `analytics-service` owns CRUD for regular payment records in addition to automatic regular expense detection.
+- Rejected: placing manual subscriptions/rent CRUD in `finance-service`.
+- Reason: these records are analysis/forecast inputs used for available-funds calculation, reminders, health scoring, and recommendations; they are not raw transactions.
+- Trade-off: `analytics-service` must clearly distinguish detected records from user-created or user-edited records.
+
 ## Proposals Not Yet Applied
 
-No additional endpoints beyond the user's list are accepted in this plan yet.
+No additional endpoint proposals beyond the explicitly approved list are accepted in this plan yet.
 
 Potential endpoint additions should be approved explicitly before they are moved into `Public API Draft`.

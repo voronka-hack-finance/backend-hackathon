@@ -56,7 +56,7 @@ flowchart LR
         finance["finance-service<br/>transactions + accounts + goals + limits"]
         scheduler["scheduler-service<br/>reminders + limit warnings"]
         notification["notification-service<br/>Firebase push"]
-        analytics["analytics-service<br/>regular costs + expected funds"]
+        analytics["analytics-service<br/>regular payments + expected funds"]
         group["group-service<br/>family groups"]
         chat["chat-service<br/>agent chat + recommendations"]
     end
@@ -132,7 +132,7 @@ flowchart LR
 | `finance-service` | transactions list, accounts list, goals, limits, categories, finance reads/writes |
 | `scheduler-service` | reminders for expected charges and limit warnings |
 | `notification-service` | device ids, notification permission/preference state, Firebase push, test notification |
-| `analytics-service` | regular costs, expected incomes, expected expenses, available balance for period |
+| `analytics-service` | regular payment CRUD, regular cost detection, expected incomes, expected expenses, available balance for period |
 | `group-service` | family groups, members, invitations, accept/decline, family budget assembly |
 | `chat-service` | agent recommendations, chat list, chat history, chat messages |
 
@@ -154,6 +154,7 @@ flowchart LR
 | Reminder planning | `scheduler-service` | `finance-service` / `analytics-service` | request-reply | finance/analytics queries |
 | Notification delivery | `scheduler-service` | `notification-service` | background task | `notifications.send` |
 | Notification devices/test | `api-gateway-service` | `notification-service` | request-reply | `notifications.*` |
+| Regular payments CRUD | `api-gateway-service` | `analytics-service` | request-reply | `analytics.regular_expenses.*` |
 | Analytics reads | `api-gateway-service` | `analytics-service` | request-reply | `analytics.*` |
 | Family budget | `group-service` | `analytics-service` | request-reply | `analytics.member_budget.get` |
 | Group CRUD/invitations | `api-gateway-service` | `group-service` | request-reply | `groups.*`, `group_invitations.*` |

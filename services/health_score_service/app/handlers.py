@@ -139,7 +139,14 @@ def _build_profile(
     optional_expenses = _sum_by_markers(category_expenses, OPTIONAL_CATEGORY_MARKERS)
     unclear_expenses = _sum_by_markers(category_expenses, UNCLEAR_CATEGORY_MARKERS)
     credit_payments = _sum_by_markers(category_expenses, CREDIT_CATEGORY_MARKERS)
-    fixed_expenses = sum((_money(row.get("average_amount")) for row in regular_expenses if row.get("status") in {None, "active"}), MONEY_ZERO)
+    fixed_expenses = sum(
+        (
+            _money(row.get("expected_amount") if row.get("expected_amount") is not None else row.get("average_amount"))
+            for row in regular_expenses
+            if row.get("status") in {None, "active"}
+        ),
+        MONEY_ZERO,
+    )
     variable_expenses = max(total_expenses - fixed_expenses, MONEY_ZERO)
     mandatory_expenses = fixed_expenses + _sum_by_markers(category_expenses, MANDATORY_CATEGORY_MARKERS)
     net_cashflow = total_income - total_expenses

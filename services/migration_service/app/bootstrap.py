@@ -5,6 +5,7 @@ import logging
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 from minio import Minio
@@ -16,7 +17,11 @@ from services.file_service.app.imports.parsers.family_budget_excel_v1 import (
     FamilyBudgetExcelParser,
 )
 from services.file_service.app.storage.client import ObjectStorage
-from services.finance_service.app.handlers import handle_transactions_bulk_create
+from services.finance_service.app.handlers import (
+    handle_accounts_resolve_by_card,
+    handle_accounts_update,
+    handle_transactions_bulk_create,
+)
 from services.migration_service.app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -25,6 +30,12 @@ SCRIPT_KEY = "family-budget-excel"
 SCRIPT_GROUP = "data-bootstrap"
 CHUNK_SIZE = 500
 CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+SBER_BANK_SOURCE = "СБЕР"
+SBER_DEMO_CARD_LAST4 = "8336"
+SBER_DEMO_CARD_MASK = "*8336"
+SBER_DEMO_DISPLAY_NAME = "Сбер ••8336"
+SBER_DEMO_LIVE_SHEET = "СБЕР_live"
 
 _parser = FamilyBudgetExcelParser()
 
@@ -115,7 +126,182 @@ def _import_workbook(engine: Engine, path: Path, file_bytes: bytes) -> int:
         inserted += int(reply.get("inserted", 0))
 
     _finalize_import(engine, import_id, file_id, result, inserted)
+    demo_inserted = _seed_sber_demo_account(
+        user_id=user_id,
+        envelope=envelope,
+        file_id=file_id,
+        import_id=import_id,
+    )
+    return inserted + demo_inserted
+
+
+def _seed_sber_demo_account(
+    *,
+    user_id: UUID,
+    envelope: dict,
+    file_id: UUID,
+    import_id: UUID,
+) -> int:
+    account = _ensure_sber_demo_account(envelope)
+    items = build_sber_demo_transactions(
+        account_id=UUID(str(account["id"])),
+        import_id=import_id,
+        source_file_id=file_id,
+    )
+    reply = handle_transactions_bulk_create({"items": items}, envelope)
+    inserted = int(reply.get("inserted", 0))
+    logger.info(
+        "SBER demo account %s seeded with %s live transactions for user %s",
+        account["id"],
+        inserted,
+        user_id,
+    )
     return inserted
+
+
+def _ensure_sber_demo_account(envelope: dict) -> dict:
+    account = handle_accounts_resolve_by_card(
+        {
+            "card_last4": SBER_DEMO_CARD_LAST4,
+            "card_mask": SBER_DEMO_CARD_MASK,
+            "display_name": SBER_DEMO_DISPLAY_NAME,
+            "bank_source": SBER_BANK_SOURCE,
+            "currency": "RUB",
+            "account_type": "card",
+        },
+        envelope,
+    )
+    if account.get("bank_source") != SBER_BANK_SOURCE or account.get("display_name") != SBER_DEMO_DISPLAY_NAME:
+        account = handle_accounts_update(
+            {
+                "account_id": account["id"],
+                "bank_source": SBER_BANK_SOURCE,
+                "display_name": SBER_DEMO_DISPLAY_NAME,
+            },
+            envelope,
+        )
+    return account
+
+
+def build_sber_demo_transactions(
+    *,
+    account_id: UUID,
+    import_id: UUID,
+    source_file_id: UUID,
+) -> list[dict[str, Any]]:
+    specs = [
+        {
+            "row": 900_001,
+            "type": "income",
+            "operation_at": "2026-05-25T09:15:00+00:00",
+            "payment_at": "2026-05-25T09:15:00+00:00",
+            "operation_amount": "85000.00",
+            "payment_amount": "85000.00",
+            "cashback_amount": "0.00",
+            "bonus_amount": "0.00",
+            "investment_rounding_amount": "0.00",
+            "rounded_operation_amount": "85000.00",
+            "category_name": "Зарплата",
+            "mcc": None,
+            "description": "ООО «ТехноСофт»",
+        },
+        {
+            "row": 900_002,
+            "type": "expense",
+            "operation_at": "2026-05-28T19:42:00+00:00",
+            "payment_at": "2026-05-28T19:42:00+00:00",
+            "operation_amount": "-2347.50",
+            "payment_amount": "-2347.50",
+            "cashback_amount": "23.48",
+            "bonus_amount": "23.48",
+            "investment_rounding_amount": "2.50",
+            "rounded_operation_amount": "-2350.00",
+            "category_name": "Супермаркеты",
+            "mcc": "5411",
+            "description": "Пятёрочка",
+        },
+        {
+            "row": 900_003,
+            "type": "expense",
+            "operation_at": "2026-05-29T08:17:00+00:00",
+            "payment_at": "2026-05-29T08:17:00+00:00",
+            "operation_amount": "-456.00",
+            "payment_amount": "-456.00",
+            "cashback_amount": "4.56",
+            "bonus_amount": "4.56",
+            "investment_rounding_amount": "4.00",
+            "rounded_operation_amount": "-460.00",
+            "category_name": "Тaxi",
+            "mcc": "4121",
+            "description": "Яндекс Go",
+        },
+        {
+            "row": 900_004,
+            "type": "expense",
+            "operation_at": "2026-05-30T14:03:00+00:00",
+            "payment_at": "2026-05-30T14:03:00+00:00",
+            "operation_amount": "-1890.00",
+            "payment_amount": "-1890.00",
+            "cashback_amount": "37.80",
+            "bonus_amount": "37.80",
+            "investment_rounding_amount": "10.00",
+            "rounded_operation_amount": "-1900.00",
+            "category_name": "Маркетплейсы",
+            "mcc": "5399",
+            "description": "OZON.RU",
+        },
+    ]
+    items: list[dict[str, Any]] = []
+    for spec in specs:
+        raw_payload = {
+            "Дата операции": spec["operation_at"].replace("+00:00", ""),
+            "Дата платежа": spec["payment_at"].replace("+00:00", ""),
+            "Номер карты": SBER_DEMO_CARD_MASK,
+            "Статус": "OK",
+            "Сумма операции": spec["operation_amount"],
+            "Валюта операции": "RUB",
+            "Сумма платежа": spec["payment_amount"],
+            "Валюта платежа": "RUB",
+            "Кэшбэк": spec["cashback_amount"],
+            "Категория": spec["category_name"],
+            "MCC": spec["mcc"] or "",
+            "Описание": spec["description"],
+            "Бонусы (включая кэшбэк)": spec["bonus_amount"],
+            "Округление на инвесткопилку": spec["investment_rounding_amount"],
+            "Сумма операции с округлением": spec["rounded_operation_amount"],
+        }
+        dedupe_key = hashlib.sha256(
+            f"{SBER_DEMO_LIVE_SHEET}:{spec['row']}:{spec['description']}:{spec['operation_amount']}".encode()
+        ).hexdigest()
+        items.append(
+            {
+                "account_id": str(account_id),
+                "import_id": str(import_id),
+                "source_file_id": str(source_file_id),
+                "source_sheet": SBER_DEMO_LIVE_SHEET,
+                "source_row_number": spec["row"],
+                "type": spec["type"],
+                "operation_at": spec["operation_at"],
+                "payment_at": spec["payment_at"],
+                "card_mask": SBER_DEMO_CARD_MASK,
+                "card_last4": SBER_DEMO_CARD_LAST4,
+                "status": "OK",
+                "operation_amount": spec["operation_amount"],
+                "operation_currency": "RUB",
+                "payment_amount": spec["payment_amount"],
+                "payment_currency": "RUB",
+                "cashback_amount": spec["cashback_amount"],
+                "category_name": spec["category_name"],
+                "mcc": spec["mcc"],
+                "description": spec["description"],
+                "bonus_amount": spec["bonus_amount"],
+                "investment_rounding_amount": spec["investment_rounding_amount"],
+                "rounded_operation_amount": spec["rounded_operation_amount"],
+                "dedupe_key": dedupe_key,
+                "raw_payload": raw_payload,
+            }
+        )
+    return items
 
 
 def _create_bootstrap_user(engine: Engine) -> UUID:

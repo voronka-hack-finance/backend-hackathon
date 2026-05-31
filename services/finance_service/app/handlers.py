@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from typing import Any
+import uuid as uuid_stdlib
 from uuid import UUID
+
+IMPORT_CATEGORY_NAMESPACE = uuid_stdlib.UUID("f47ac10b-58cc-4372-a567-0e02b2c3d479")
 
 from common.messaging import MessageError, require_user
 from sqlalchemy import Select, and_, func, or_, select, text
@@ -359,6 +362,8 @@ def handle_accounts_resolve_by_card(payload: dict, envelope: dict) -> dict:
 def handle_categories_list(payload: dict, envelope: dict) -> dict:
     user_id = UUID(require_user(envelope).id)
     with SessionLocal() as db:
+        if _truthy(payload.get("include_all")):
+            return _list_categories_including_import(db, user_id, payload)
         return _list_owned(db, AccountCategory, AccountCategory.created_by_user_id, CATEGORY_FIELDS, user_id, payload)
 
 
@@ -605,6 +610,81 @@ def _resolve_account(db: Session, user_id: UUID, payload: dict) -> Account:
     return account
 
 
+def _list_categories_including_import(db: Session, user_id: UUID, payload: dict) -> dict:
+    page, page_size = _page(payload)
+    include_archived = _truthy(payload.get("include_archived"))
+
+    manual_stmt = select(AccountCategory).where(AccountCategory.created_by_user_id == user_id)
+    if not include_archived:
+        manual_stmt = manual_stmt.where(AccountCategory.is_archived.is_(False))
+    manual_rows = db.scalars(manual_stmt).all()
+
+    items: list[dict] = []
+    seen_names: set[str] = set()
+    for row in manual_rows:
+        item = _serialize(row, CATEGORY_FIELDS)
+        item["source"] = "manual"
+        items.append(item)
+        seen_names.add(str(item["name"]).casefold())
+
+    import_rows = db.execute(
+        text(
+            """
+            select
+              category_name as name,
+              min(operation_at) as created_at,
+              max(operation_at) as updated_at
+            from transactions
+            where user_id = :user_id
+              and category_name is not null
+              and btrim(category_name) <> ''
+            group by category_name
+            order by category_name
+            """
+        ),
+        {"user_id": user_id},
+    ).mappings().all()
+
+    for row in import_rows:
+        name = str(row["name"])
+        if name.casefold() in seen_names:
+            continue
+        category_id = _import_category_id(user_id, name)
+        items.append(
+            {
+                "id": str(category_id),
+                "account_id": None,
+                "created_by_user_id": str(user_id),
+                "name": name,
+                "description": None,
+                "icon_key": None,
+                "is_archived": False,
+                "created_at": row["created_at"].isoformat() if row["created_at"] else datetime.now(UTC).isoformat(),
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else datetime.now(UTC).isoformat(),
+                "source": "import",
+            }
+        )
+        seen_names.add(name.casefold())
+
+    items.sort(key=lambda item: str(item["name"]).casefold())
+    total = len(items)
+    start = (page - 1) * page_size
+    page_items = items[start : start + page_size]
+    return {"items": page_items, "pagination": {"page": page, "page_size": page_size, "total": total}}
+
+
+def _import_category_id(user_id: UUID, name: str) -> UUID:
+    return uuid_stdlib.uuid5(IMPORT_CATEGORY_NAMESPACE, f"{user_id}:{name}")
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _list_owned(db: Session, model, owner_column, fields: tuple[str, ...], user_id: UUID, payload: dict) -> dict:
     page, page_size = _page(payload)
     stmt = select(model).where(owner_column == user_id)
@@ -616,7 +696,11 @@ def _list_owned(db: Session, model, owner_column, fields: tuple[str, ...], user_
     if order_column is not None:
         stmt = stmt.order_by(order_column.desc())
     rows = db.scalars(stmt.offset((page - 1) * page_size).limit(page_size)).all()
-    return {"items": [_serialize(row, fields) for row in rows], "pagination": {"page": page, "page_size": page_size, "total": total}}
+    items = [_serialize(row, fields) for row in rows]
+    if model is AccountCategory:
+        for item in items:
+            item["source"] = "manual"
+    return {"items": items, "pagination": {"page": page, "page_size": page_size, "total": total}}
 
 
 def _get_entity_response(envelope: dict, model, owner_column, fields: tuple[str, ...], entity_id: Any) -> dict:

@@ -216,12 +216,16 @@ erDiagram
         uuid user_id FK
         uuid account_id FK
         uuid category_id FK
+        string title
+        string description
         string merchant_pattern
+        decimal expected_amount
         decimal average_amount
         string currency
         integer frequency_days
         datetime next_expected_at
         decimal confidence
+        string source_type
         string status
         datetime created_at
         datetime updated_at
@@ -422,7 +426,9 @@ erDiagram
 - `access-service` owns identity and token/session data only.
 - `file-service` owns original file lifecycle and import status. It can create/reuse accounts and insert imported transactions as part of import.
 - `finance-service` owns user-facing finance CRUD/read behavior for accounts, transactions, goals, limits, and categories.
-- `analytics-service` stores derived records. Its results are not the source of truth for transactions.
+- `analytics-service` stores derived records and user-maintained forecast inputs. `regular_expenses` covers both automatically detected recurring expenses and manual records like subscriptions, rent, and utilities.
+- `regular_expenses.source_type` should distinguish `detected`, `manual`, and `user_adjusted` records so automatic detection does not overwrite user edits.
+- `regular_expenses.expected_amount` is the user-facing planned amount; `average_amount` can be filled by detection from transaction history.
 - `scheduler-service` plans reminders, but `notification-service` sends them.
 - `group-service` owns family membership and invitation state.
 - `chat-service` owns recommendations/chats, but should request finance/analytics context through RabbitMQ instead of reading their tables directly.
