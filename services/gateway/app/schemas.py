@@ -297,6 +297,81 @@ class GoalUpdateRequest(BaseModel):
     status: str | None = None
 
 
+class DebtResponse(BaseModel):
+    id: UUID = Field(description="Debt identifier.")
+    owner_user_id: UUID = Field(description="Owner user identifier from JWT scope.")
+    account_id: UUID | None = Field(default=None, description="Optional linked account identifier.")
+    title: str = Field(description="Debt title shown to the user.")
+    description: str | None = Field(default=None, description="Optional debt description.")
+    debt_type: Literal["loan", "credit_card", "other"] = Field(description="Debt type.")
+    remaining_balance: str = Field(description="Remaining balance as a decimal string.")
+    credit_limit: str | None = Field(default=None, description="Credit limit as a decimal string. Required for credit_card.")
+    monthly_payment: str | None = Field(default=None, description="Monthly payment as a decimal string.")
+    currency: str = Field(description="Debt currency.")
+    payment_day: int | None = Field(default=None, ge=1, le=31, description="Payment day of month.")
+    overdue_days: int = Field(ge=0, description="Current overdue days, maintained by the user.")
+    interest_rate: str | None = Field(default=None, description="Annual interest rate as a decimal string.")
+    status: Literal["active", "closed", "deleted"] = Field(description="Debt lifecycle status.")
+    created_at: datetime = Field(description="Creation timestamp.")
+    updated_at: datetime = Field(description="Last update timestamp.")
+
+
+class DebtCreateRequest(BaseModel):
+    title: str = Field(description="Debt title shown to the user.")
+    debt_type: Literal["loan", "credit_card", "other"] = Field(description="Debt type.")
+    remaining_balance: str = Field(description="Remaining balance as a decimal string.")
+    account_id: UUID | None = Field(default=None, description="Optional linked account identifier.")
+    description: str | None = Field(default=None, description="Optional debt description.")
+    credit_limit: str | None = Field(default=None, description="Credit limit. Required and greater than 0 for credit_card.")
+    monthly_payment: str | None = Field(default=None, description="Monthly payment as a decimal string.")
+    currency: str = Field(default="RUB", description="Debt currency.")
+    payment_day: int | None = Field(default=None, ge=1, le=31, description="Payment day of month.")
+    overdue_days: int = Field(default=0, ge=0, description="Current overdue days.")
+    interest_rate: str | None = Field(default=None, description="Annual interest rate as a decimal string.")
+    status: Literal["active", "closed", "deleted"] = Field(default="active", description="Initial debt status.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "title": "Mortgage",
+                "debt_type": "loan",
+                "remaining_balance": "2500000.00",
+                "monthly_payment": "45000.00",
+                "currency": "RUB",
+                "payment_day": 10,
+                "overdue_days": 0,
+                "interest_rate": "10.5000",
+                "status": "active",
+            }
+        }
+    }
+
+
+class DebtUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, description="Debt title shown to the user.")
+    debt_type: Literal["loan", "credit_card", "other"] | None = Field(default=None, description="Debt type.")
+    remaining_balance: str | None = Field(default=None, description="Remaining balance as a decimal string.")
+    account_id: UUID | None = Field(default=None, description="Optional linked account identifier.")
+    description: str | None = Field(default=None, description="Optional debt description.")
+    credit_limit: str | None = Field(default=None, description="Credit limit. Required and greater than 0 for credit_card.")
+    monthly_payment: str | None = Field(default=None, description="Monthly payment as a decimal string.")
+    currency: str | None = Field(default=None, description="Debt currency.")
+    payment_day: int | None = Field(default=None, ge=1, le=31, description="Payment day of month.")
+    overdue_days: int | None = Field(default=None, ge=0, description="Current overdue days.")
+    interest_rate: str | None = Field(default=None, description="Annual interest rate as a decimal string.")
+    status: Literal["active", "closed", "deleted"] | None = Field(default=None, description="Debt lifecycle status.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "remaining_balance": "2450000.00",
+                "monthly_payment": "46000.00",
+                "overdue_days": 0,
+            }
+        }
+    }
+
+
 class AccountsPageResponse(BaseModel):
     items: list[AccountResponse]
     pagination: PaginationResponse
@@ -314,6 +389,11 @@ class LimitsPageResponse(BaseModel):
 
 class GoalsPageResponse(BaseModel):
     items: list[GoalResponse]
+    pagination: PaginationResponse
+
+
+class DebtsPageResponse(BaseModel):
+    items: list[DebtResponse] = Field(description="Current user's debts.")
     pagination: PaginationResponse
 
 

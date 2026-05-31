@@ -53,7 +53,7 @@ flowchart LR
     subgraph services["Backend services"]
         access["access-service<br/>auth + profile"]
         file["file-service<br/>files + import"]
-        finance["finance-service<br/>transactions + accounts + goals + limits"]
+        finance["finance-service<br/>transactions + accounts + goals + limits + debts"]
         scheduler["scheduler-service<br/>reminders + limit warnings"]
         notification["notification-service<br/>Firebase push"]
         analytics["analytics-service<br/>regular payments + expected funds"]
@@ -62,7 +62,7 @@ flowchart LR
     end
 
     subgraph startup["Startup jobs"]
-        migration["migration-service<br/>PostgreSQL migrations"]
+        migration["migration-service<br/>Alembic PostgreSQL migrations"]
         buckets["create-bucket-service<br/>MinIO buckets"]
     end
 
@@ -126,10 +126,10 @@ flowchart LR
 |-----------|----------------|
 | `api-gateway-service` | public HTTP API, creates RabbitMQ task messages, waits for replies, returns public responses |
 | `access-service` | registration, login, logout, refresh, me, profile patch, password change, JWT verification |
-| `migration-service` | PostgreSQL migrations at startup |
+| `migration-service` | Alembic schema migrations at startup; optional dev data bootstrap |
 | `create-bucket-service` | MinIO bucket creation at startup |
 | `file-service` | uploaded files, MinIO storage, parsing source spreadsheets, import jobs/errors, import-origin account/transaction writes |
-| `finance-service` | transactions list, accounts list, goals, limits, categories, finance reads/writes |
+| `finance-service` | transactions list, accounts list, goals, limits, categories, debts, finance reads/writes |
 | `scheduler-service` | reminders for expected charges and limit warnings |
 | `notification-service` | device ids, notification permission/preference state, Firebase push, test notification |
 | `analytics-service` | regular payment CRUD, regular cost detection, expected incomes, expected expenses, available balance for period |
@@ -151,6 +151,7 @@ flowchart LR
 | Goals CRUD | `api-gateway-service` | `finance-service` | request-reply | `goals.*` |
 | Limits CRUD | `api-gateway-service` | `finance-service` | request-reply | `limits.*` |
 | Categories CRUD | `api-gateway-service` | `finance-service` | request-reply | `categories.*` |
+| Debts CRUD | `api-gateway-service` | `finance-service` | request-reply | `debts.*` |
 | Reminder planning | `scheduler-service` | `finance-service` / `analytics-service` | request-reply | finance/analytics queries |
 | Notification delivery | `scheduler-service` | `notification-service` | background task | `notifications.send` |
 | Notification devices/test | `api-gateway-service` | `notification-service` | request-reply | `notifications.*` |

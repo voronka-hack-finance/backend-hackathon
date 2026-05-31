@@ -80,6 +80,7 @@ def _calculate_and_store(user: UserContext, period: str) -> dict:
     accounts = _items(_rpc(FINANCE_QUEUE, "accounts.list", {"page": 1, "page_size": 500}, user))
     limits = _items(_rpc(FINANCE_QUEUE, "limits.list", {"page": 1, "page_size": 500}, user))
     goals = _items(_rpc(FINANCE_QUEUE, "goals.list", {"page": 1, "page_size": 500}, user))
+    debts = _items(_rpc(FINANCE_QUEUE, "debts.list", {"status": "active", "page": 1, "page_size": 500}, user))
     balance_before = _rpc(FINANCE_QUEUE, "finance.balance_before_period", {"period_start": period_start.isoformat()}, user)
     available = _safe_rpc(
         ANALYTICS_QUEUE,
@@ -101,6 +102,7 @@ def _calculate_and_store(user: UserContext, period: str) -> dict:
         accounts=accounts,
         limits=limits,
         goals=goals,
+        debts=debts,
         balance_before=balance_before,
         available=available,
         expected_incomes=expected_incomes,
@@ -122,6 +124,7 @@ def _build_profile(
     accounts: list[dict],
     limits: list[dict],
     goals: list[dict],
+    debts: list[dict],
     balance_before: dict,
     available: dict,
     expected_incomes: list[dict],
@@ -138,7 +141,9 @@ def _build_profile(
     category_limits = _category_limits(category_expenses, limits)
     optional_expenses = _sum_by_markers(category_expenses, OPTIONAL_CATEGORY_MARKERS)
     unclear_expenses = _sum_by_markers(category_expenses, UNCLEAR_CATEGORY_MARKERS)
-    credit_payments = _sum_by_markers(category_expenses, CREDIT_CATEGORY_MARKERS)
+    proxy_credit_payments = _sum_by_markers(category_expenses, CREDIT_CATEGORY_MARKERS)
+    debt_metrics = _debt_metrics(debts, transactions + previous_transactions)
+    credit_payments = debt_metrics["monthly_debt_payment"] if debts else proxy_credit_payments
     fixed_expenses = sum(
         (
             _money(row.get("expected_amount") if row.get("expected_amount") is not None else row.get("average_amount"))
@@ -169,9 +174,17 @@ def _build_profile(
     budget_score = _budget_score(category_limits, data_gaps)
     goal_metrics, goal_score = _goal_metrics(goals, net_cashflow, data_gaps)
     income_stability_score = _income_stability(transactions + previous_transactions, data_gaps)
-    debt_to_income_ratio = _percent(credit_payments, total_income)
-    active_credits_count = _active_credit_count(transactions + previous_transactions)
-    credit_load_index = _credit_load_index(debt_to_income_ratio, net_cashflow, credit_payments, active_credits_count)
+    debt_income_base = debt_metrics["average_monthly_income"] if debts else total_income
+    debt_to_income_ratio = _percent(credit_payments, debt_income_base)
+    active_credits_count = int(debt_metrics["active_credits_count"]) if debts else _active_credit_count(transactions + previous_transactions)
+    credit_load_index = _credit_load_index(
+        debt_to_income_ratio,
+        net_cashflow,
+        credit_payments,
+        active_credits_count,
+        credit_card_utilization=debt_metrics["credit_card_utilization"] if debts else None,
+        overdue_days=int(debt_metrics["overdue_days"]) if debts else None,
+    )
 
     components = {
         "cashflow_score": _cashflow_score(net_cashflow, total_income, data_gaps),
@@ -225,19 +238,24 @@ def _build_profile(
         "goal_affordability": goal_metrics.get("goal_affordability"),
         "reserve_months": _optional_decimal(reserve_months),
         "income_stability_score": _optional_decimal(income_stability_score),
+        "has_debt": bool(debts and debt_metrics["debt_amount"] > 0),
+        "debt_amount": _decimal_str(debt_metrics["debt_amount"] if debts else MONEY_ZERO),
+        "monthly_debt_payment": _decimal_str(debt_metrics["monthly_debt_payment"] if debts else MONEY_ZERO),
         "monthly_credit_payments": _decimal_str(credit_payments),
         "debt_to_income_ratio": _optional_decimal(debt_to_income_ratio),
         "active_credits_count": active_credits_count,
+        "credit_card_utilization": _optional_decimal(debt_metrics["credit_card_utilization"] if debts else None),
+        "overdue_days": int(debt_metrics["overdue_days"]) if debts else None,
         "credit_load_index": _decimal_str(credit_load_index),
         "credit_load_zone": _credit_zone(credit_load_index),
-        "credit_load_index_partial": True,
+        "credit_load_index_partial": not bool(debts),
         "financial_health_score": _decimal_str(financial_score),
         "financial_health_status": _health_status(financial_score),
         "score_components": {key: _optional_decimal(value) for key, value in components.items()},
         "weights_applied": {key: _decimal_str(value) for key, value in weights_applied.items()},
         "expected_incomes": expected_incomes,
         "expected_expenses": expected_expenses,
-        "data_gaps": data_gaps + [
+        "data_gaps": data_gaps if debts else data_gaps + [
             {"field": "credit_card_utilization", "reason": "No credit-card limit and balance source is available in MVP."},
             {"field": "overdue_days", "reason": "No overdue debt data source is available in MVP."},
             {"field": "overdue_score", "reason": "No overdue debt data source is available in MVP."},
@@ -460,6 +478,44 @@ def _income_stability(transactions: list[dict], data_gaps: list[dict[str, str]])
     return _clamp(((Decimal("0.50") - coefficient) / Decimal("0.50")) * Decimal("100"))
 
 
+def _debt_metrics(debts: list[dict], transactions: list[dict]) -> dict[str, Decimal | int | None]:
+    active = [debt for debt in debts if debt.get("status") in {None, "active"}]
+    debt_amount = sum((_money(debt.get("remaining_balance")) for debt in active), MONEY_ZERO)
+    monthly_debt_payment = sum((_money(debt.get("monthly_payment")) for debt in active), MONEY_ZERO)
+    active_credits_count = sum(
+        1
+        for debt in active
+        if debt.get("debt_type") in {"loan", "credit_card"} and _money(debt.get("remaining_balance")) > 0
+    )
+    credit_cards = [debt for debt in active if debt.get("debt_type") == "credit_card"]
+    credit_card_balance = sum((_money(debt.get("remaining_balance")) for debt in credit_cards), MONEY_ZERO)
+    credit_card_limit = sum((_money(debt.get("credit_limit")) for debt in credit_cards), MONEY_ZERO)
+    credit_card_utilization = _percent(credit_card_balance, credit_card_limit, default=PERCENT_ZERO) if credit_cards else PERCENT_ZERO
+    overdue_days = max((int(debt.get("overdue_days") or 0) for debt in active), default=0)
+    return {
+        "debt_amount": debt_amount,
+        "monthly_debt_payment": monthly_debt_payment,
+        "active_credits_count": active_credits_count,
+        "credit_card_utilization": credit_card_utilization,
+        "overdue_days": overdue_days,
+        "average_monthly_income": _average_monthly_income(transactions),
+    }
+
+
+def _average_monthly_income(transactions: list[dict]) -> Decimal:
+    monthly: dict[str, Decimal] = {}
+    for transaction in transactions:
+        if transaction.get("type") != "income":
+            continue
+        operation_at = _parse_datetime(str(transaction.get("operation_at")))
+        key = f"{operation_at.year:04d}-{operation_at.month:02d}"
+        monthly[key] = monthly.get(key, MONEY_ZERO) + abs(_money(transaction.get("operation_amount")))
+    values = [value for value in monthly.values() if value > 0]
+    if not values:
+        return MONEY_ZERO
+    return sum(values, MONEY_ZERO) / Decimal(len(values))
+
+
 def _cashflow_score(net_cashflow: Decimal, total_income: Decimal, data_gaps: list[dict[str, str]]) -> Decimal | None:
     if total_income == 0:
         data_gaps.append({"field": "cashflow_score", "reason": "No income transactions for the period."})
@@ -501,6 +557,9 @@ def _credit_load_index(
     net_cashflow: Decimal,
     credit_payments: Decimal,
     active_credits_count: int,
+    *,
+    credit_card_utilization: Decimal | None = None,
+    overdue_days: int | None = None,
 ) -> Decimal:
     components: list[tuple[Decimal, Decimal]] = []
     if debt_to_income_ratio is not None:
@@ -509,6 +568,10 @@ def _credit_load_index(
     if credit_payments > 0:
         components.append((Decimal("0.10"), Decimal("100") if free_after_debt < 0 else Decimal("25")))
     components.append((Decimal("0.05"), _clamp(Decimal(active_credits_count) * Decimal("25"))))
+    if credit_card_utilization is not None:
+        components.append((Decimal("0.15"), _clamp(credit_card_utilization)))
+    if overdue_days is not None:
+        components.append((Decimal("0.15"), _clamp(Decimal(overdue_days) * Decimal("10"))))
     total_weight = sum((weight for weight, _ in components), PERCENT_ZERO)
     return _clamp(sum((score * (weight / total_weight) for weight, score in components), PERCENT_ZERO))
 

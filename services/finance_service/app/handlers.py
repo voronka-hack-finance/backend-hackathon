@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from services.finance_service.app.db import SessionLocal
-from services.finance_service.app.models import Account, AccountCategory, CategoryLimit, SavingsGoal, Transaction
+from services.finance_service.app.models import Account, AccountCategory, CategoryLimit, SavingsGoal, Transaction, UserDebt
 
 DECIMAL_FIELDS = {
     "operation_amount",
@@ -27,6 +27,10 @@ DECIMAL_FIELDS = {
     "limit_amount",
     "target_amount",
     "current_amount",
+    "remaining_balance",
+    "credit_limit",
+    "monthly_payment",
+    "interest_rate",
 }
 UUID_FIELDS = {"id", "user_id", "owner_user_id", "created_by_user_id", "account_id", "category_id", "family_group_id"}
 DATETIME_FIELDS = {"operation_at", "payment_at", "period_started_at", "created_at", "updated_at"}
@@ -111,6 +115,24 @@ GOAL_FIELDS = (
     "current_amount",
     "currency",
     "target_date",
+    "status",
+    "created_at",
+    "updated_at",
+)
+DEBT_FIELDS = (
+    "id",
+    "owner_user_id",
+    "account_id",
+    "title",
+    "description",
+    "debt_type",
+    "remaining_balance",
+    "credit_limit",
+    "monthly_payment",
+    "currency",
+    "payment_day",
+    "overdue_days",
+    "interest_rate",
     "status",
     "created_at",
     "updated_at",
@@ -507,6 +529,82 @@ def handle_goals_delete(payload: dict, envelope: dict) -> dict:
     return _delete_entity_response(envelope, SavingsGoal, SavingsGoal.owner_user_id, payload.get("goal_id") or payload.get("id"))
 
 
+def handle_debts_list(payload: dict, envelope: dict) -> dict:
+    user_id = UUID(require_user(envelope).id)
+    page, page_size = _page(payload)
+    status = payload.get("status") or "active"
+    debt_type = payload.get("debt_type")
+    with SessionLocal() as db:
+        stmt = select(UserDebt).where(UserDebt.owner_user_id == user_id)
+        if status:
+            _validate_choice("status", status, {"active", "closed", "deleted"})
+            stmt = stmt.where(UserDebt.status == status)
+        if debt_type:
+            _validate_choice("debt_type", debt_type, {"loan", "credit_card", "other"})
+            stmt = stmt.where(UserDebt.debt_type == debt_type)
+        total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        rows = db.scalars(
+            stmt.order_by(UserDebt.updated_at.desc(), UserDebt.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).all()
+        return {
+            "items": [_serialize(row, DEBT_FIELDS) for row in rows],
+            "pagination": {"page": page, "page_size": page_size, "total": total},
+        }
+
+
+def handle_debts_get(payload: dict, envelope: dict) -> dict:
+    return _get_entity_response(envelope, UserDebt, UserDebt.owner_user_id, DEBT_FIELDS, payload.get("debt_id") or payload.get("id"))
+
+
+def handle_debts_create(payload: dict, envelope: dict) -> dict:
+    user_id = UUID(require_user(envelope).id)
+    data = _pick(payload, DEBT_FIELDS, exclude={"id", "owner_user_id", "created_at", "updated_at"})
+    if not data.get("title") or not data.get("debt_type") or data.get("remaining_balance") is None:
+        raise MessageError(422, "title, debt_type and remaining_balance are required")
+    data["owner_user_id"] = user_id
+    data.setdefault("currency", "RUB")
+    data.setdefault("overdue_days", 0)
+    data.setdefault("status", "active")
+    _coerce_entity_data(data)
+    _validate_debt_data(data)
+    with SessionLocal() as db:
+        _validate_owned_references(db, user_id, data)
+        debt = UserDebt(**data)
+        db.add(debt)
+        db.commit()
+        db.refresh(debt)
+        return _serialize(debt, DEBT_FIELDS)
+
+
+def handle_debts_update(payload: dict, envelope: dict) -> dict:
+    user_id = UUID(require_user(envelope).id)
+    debt_id = payload.get("debt_id") or payload.get("id")
+    with SessionLocal() as db:
+        debt = _get_owned(db, UserDebt, UserDebt.owner_user_id, user_id, debt_id)
+        updates = _pick(payload, DEBT_FIELDS, exclude={"id", "owner_user_id", "created_at", "updated_at"})
+        _coerce_entity_data(updates)
+        merged = {field: getattr(debt, field) for field in DEBT_FIELDS if hasattr(debt, field)}
+        merged.update(updates)
+        _validate_debt_data(merged)
+        _validate_owned_references(db, user_id, updates)
+        for key, value in updates.items():
+            setattr(debt, key, value)
+        db.commit()
+        db.refresh(debt)
+        return _serialize(debt, DEBT_FIELDS)
+
+
+def handle_debts_delete(payload: dict, envelope: dict) -> dict:
+    user_id = UUID(require_user(envelope).id)
+    with SessionLocal() as db:
+        debt = _get_owned(db, UserDebt, UserDebt.owner_user_id, user_id, payload.get("debt_id") or payload.get("id"))
+        debt.status = "deleted"
+        db.commit()
+    return {"status": "deleted"}
+
+
 def _apply_transaction_filters(stmt: Select, *, user_id: UUID, payload: dict) -> Select:
     conditions = [Transaction.user_id == user_id]
     date_from = payload.get("date_from")
@@ -789,6 +887,36 @@ def _validate_owned_references(db: Session, user_id: UUID, data: dict) -> None:
             raise MessageError(404, "Category not found")
 
 
+def _validate_debt_data(data: dict) -> None:
+    _validate_choice("debt_type", data.get("debt_type"), {"loan", "credit_card", "other"})
+    _validate_choice("status", data.get("status") or "active", {"active", "closed", "deleted"})
+    remaining_balance = _parse_decimal(data.get("remaining_balance"))
+    credit_limit = _parse_decimal(data.get("credit_limit"))
+    monthly_payment = _parse_decimal(data.get("monthly_payment"))
+    interest_rate = _parse_decimal(data.get("interest_rate"))
+    if remaining_balance is None:
+        raise MessageError(422, "remaining_balance is required")
+    if remaining_balance < 0:
+        raise MessageError(422, "remaining_balance must be greater than or equal to 0")
+    if str(data.get("debt_type")) == "credit_card" and (credit_limit is None or credit_limit <= 0):
+        raise MessageError(422, "credit_limit is required and must be greater than 0 for credit_card debts")
+    if monthly_payment is not None and monthly_payment < 0:
+        raise MessageError(422, "monthly_payment must be greater than or equal to 0")
+    if interest_rate is not None and interest_rate < 0:
+        raise MessageError(422, "interest_rate must be greater than or equal to 0")
+    payment_day = data.get("payment_day")
+    if payment_day is not None and not 1 <= int(payment_day) <= 31:
+        raise MessageError(422, "payment_day must be between 1 and 31")
+    overdue_days = data.get("overdue_days")
+    if overdue_days is not None and int(overdue_days) < 0:
+        raise MessageError(422, "overdue_days must be greater than or equal to 0")
+
+
+def _validate_choice(field: str, value: Any, choices: set[str]) -> None:
+    if value not in choices:
+        raise MessageError(422, f"{field} must be one of: {', '.join(sorted(choices))}")
+
+
 def _assign(row, updates: dict) -> None:
     _coerce_entity_data(updates)
     for key, value in updates.items():
@@ -941,4 +1069,9 @@ MESSAGE_HANDLERS = {
     "goals.create": handle_goals_create,
     "goals.update": handle_goals_update,
     "goals.delete": handle_goals_delete,
+    "debts.list": handle_debts_list,
+    "debts.get": handle_debts_get,
+    "debts.create": handle_debts_create,
+    "debts.update": handle_debts_update,
+    "debts.delete": handle_debts_delete,
 }

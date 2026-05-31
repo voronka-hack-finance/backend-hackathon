@@ -24,6 +24,7 @@ def test_health_profile_calculates_scores_and_reports_mvp_credit_gaps():
         accounts=[{"current_balance": "150000"}],
         limits=[],
         goals=[{"status": "active", "target_amount": "200000", "current_amount": "50000", "target_date": "2026-12-31"}],
+        debts=[],
         balance_before={"actual_balance": "100000"},
         available={"available_amount": "55000"},
         expected_incomes=[],
