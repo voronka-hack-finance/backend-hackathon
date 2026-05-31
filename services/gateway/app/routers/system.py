@@ -31,6 +31,12 @@ def health() -> HealthResponse:
     description=READY,
     response_model=HealthResponse,
 )
+@router.get(
+    "/api/v1/ready",
+    summary="Проверка готовности gateway (версионированный путь)",
+    description=READY,
+    response_model=HealthResponse,
+)
 def ready() -> HealthResponse:
     check_gateway_ready()
     return HealthResponse(status="ready")

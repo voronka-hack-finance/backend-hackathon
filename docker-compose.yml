@@ -30,6 +30,11 @@ x-backend-image: &backend-image
   build: *backend-build
   image: family-budget-backend:latest
 
+# Recreate RabbitMQ when infra/rabbitmq/* changes: bump revision below (definitions load only at startup).
+x-rabbitmq-ready: &rabbitmq-ready
+  condition: service_healthy
+  restart: true
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -66,6 +71,8 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFINITIONS_REVISION: "2"
     ports:
       - "${RABBITMQ_EXTERNAL_BIND:-0.0.0.0}:${RABBITMQ_EXTERNAL_PORT:-5673}:5672"
       - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15673}:15672"
@@ -126,8 +133,7 @@ services:
     environment:
       <<: *app-env
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq: *rabbitmq-ready
       migration-service:
         condition: service_completed_successfully
 
@@ -137,8 +143,7 @@ services:
     environment:
       <<: *app-env
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq: *rabbitmq-ready
       migration-service:
         condition: service_completed_successfully
 
@@ -148,8 +153,7 @@ services:
     environment:
       <<: *app-env
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq: *rabbitmq-ready
       migration-service:
         condition: service_completed_successfully
       create-bucket-service:
@@ -163,8 +167,7 @@ services:
     environment:
       <<: *app-env
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq: *rabbitmq-ready
       migration-service:
         condition: service_completed_successfully
 
@@ -174,8 +177,7 @@ services:
     environment:
       <<: *app-env
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq: *rabbitmq-ready
       migration-service:
         condition: service_completed_successfully
 
@@ -199,8 +201,7 @@ services:
     volumes:
       - ./infra/secrets:/app/infra/secrets:ro
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq: *rabbitmq-ready
       migration-service:
         condition: service_completed_successfully
 
@@ -210,8 +211,7 @@ services:
     environment:
       <<: *app-env
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq: *rabbitmq-ready
       migration-service:
         condition: service_completed_successfully
 
@@ -227,8 +227,7 @@ services:
       AI_WORKFLOW_RESULT_CONSUMER_ENABLED: ${AI_WORKFLOW_RESULT_CONSUMER_ENABLED:-true}
       AI_WORKFLOW_DEFAULT_TIMEZONE: ${AI_WORKFLOW_DEFAULT_TIMEZONE:-UTC}
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq: *rabbitmq-ready
       migration-service:
         condition: service_completed_successfully
 
@@ -238,8 +237,7 @@ services:
     environment:
       <<: *app-env
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq: *rabbitmq-ready
       migration-service:
         condition: service_completed_successfully
 
@@ -258,8 +256,7 @@ services:
       RPC_TIMEOUT_SECONDS: "25"
       BACKEND_DEFAULT_TRANSACTION_PERIOD_MONTHS: "6"
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq: *rabbitmq-ready
       finance-service:
         condition: service_started
       analytics-service:
@@ -273,8 +270,7 @@ services:
     ports:
       - "8081:8000"
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq: *rabbitmq-ready
       access-service:
         condition: service_started
       file-service:

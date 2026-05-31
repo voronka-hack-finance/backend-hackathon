@@ -42,7 +42,6 @@ jobs:
           ssh -p ${{ secrets.VPS_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             set -e
             cd /opt/zanachka/backend
-            docker compose -f docker-compose.prod.yml build
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
             docker image prune -f
           EOF

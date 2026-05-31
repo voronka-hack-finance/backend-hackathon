@@ -11,6 +11,11 @@ x-backend-image: &backend-image
   build: *backend-build
   image: family-budget-backend:latest
 
+# Recreate RabbitMQ when infra/rabbitmq/* changes: bump revision below (definitions load only at startup).
+x-rabbitmq-ready: &rabbitmq-ready
+  condition: service_healthy
+  restart: true
+
 services:
   postgres:
     image: postgres:17.4
@@ -35,6 +40,8 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     restart: unless-stopped
+    environment:
+      RABBITMQ_DEFINITIONS_REVISION: "2"
     ports:
       - "${RABBITMQ_EXTERNAL_BIND:-0.0.0.0}:${RABBITMQ_EXTERNAL_PORT:-5672}:5672"
       - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
@@ -88,8 +95,9 @@ services:
     restart: unless-stopped
     environment: *app_env
     depends_on:
-      - rabbitmq
-      - migration-service
+      rabbitmq: *rabbitmq-ready
+      migration-service:
+        condition: service_completed_successfully
 
   finance-service:
     <<: *backend-image
@@ -97,8 +105,9 @@ services:
     restart: unless-stopped
     environment: *app_env
     depends_on:
-      - rabbitmq
-      - migration-service
+      rabbitmq: *rabbitmq-ready
+      migration-service:
+        condition: service_completed_successfully
 
   file-service:
     <<: *backend-image
@@ -106,10 +115,13 @@ services:
     restart: unless-stopped
     environment: *app_env
     depends_on:
-      - rabbitmq
-      - migration-service
-      - create-bucket-service
-      - finance-service
+      rabbitmq: *rabbitmq-ready
+      migration-service:
+        condition: service_completed_successfully
+      create-bucket-service:
+        condition: service_completed_successfully
+      finance-service:
+        condition: service_started
 
   analytics-service:
     <<: *backend-image
@@ -117,8 +129,9 @@ services:
     restart: unless-stopped
     environment: *app_env
     depends_on:
-      - rabbitmq
-      - migration-service
+      rabbitmq: *rabbitmq-ready
+      migration-service:
+        condition: service_completed_successfully
 
   scheduler-service:
     <<: *backend-image
@@ -126,8 +139,9 @@ services:
     restart: unless-stopped
     environment: *app_env
     depends_on:
-      - rabbitmq
-      - migration-service
+      rabbitmq: *rabbitmq-ready
+      migration-service:
+        condition: service_completed_successfully
 
   notification-service:
     <<: *backend-image
@@ -135,8 +149,9 @@ services:
     restart: unless-stopped
     environment: *app_env
     depends_on:
-      - rabbitmq
-      - migration-service
+      rabbitmq: *rabbitmq-ready
+      migration-service:
+        condition: service_completed_successfully
 
   group-service:
     <<: *backend-image
@@ -144,8 +159,9 @@ services:
     restart: unless-stopped
     environment: *app_env
     depends_on:
-      - rabbitmq
-      - migration-service
+      rabbitmq: *rabbitmq-ready
+      migration-service:
+        condition: service_completed_successfully
 
   chat-service:
     <<: *backend-image
@@ -160,8 +176,9 @@ services:
       AI_WORKFLOW_RESULT_CONSUMER_ENABLED: ${AI_WORKFLOW_RESULT_CONSUMER_ENABLED:-true}
       AI_WORKFLOW_DEFAULT_TIMEZONE: ${AI_WORKFLOW_DEFAULT_TIMEZONE:-UTC}
     depends_on:
-      - rabbitmq
-      - migration-service
+      rabbitmq: *rabbitmq-ready
+      migration-service:
+        condition: service_completed_successfully
 
   backend-data-worker:
     build:
@@ -178,9 +195,11 @@ services:
       ANALYTICS_SERVICE_QUEUE: analytics-service
       RPC_TIMEOUT_SECONDS: "25"
     depends_on:
-      - rabbitmq
-      - finance-service
-      - analytics-service
+      rabbitmq: *rabbitmq-ready
+      finance-service:
+        condition: service_started
+      analytics-service:
+        condition: service_started
 
   gateway:
     <<: *backend-image
@@ -190,15 +209,23 @@ services:
     ports:
       - "127.0.0.1:8081:8000"
     depends_on:
-      - rabbitmq
-      - access-service
-      - file-service
-      - finance-service
-      - analytics-service
-      - notification-service
-      - group-service
-      - chat-service
-      - scheduler-service
+      rabbitmq: *rabbitmq-ready
+      access-service:
+        condition: service_started
+      file-service:
+        condition: service_started
+      finance-service:
+        condition: service_started
+      analytics-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+      group-service:
+        condition: service_started
+      chat-service:
+        condition: service_started
+      scheduler-service:
+        condition: service_started
 
 volumes:
   backend-postgres-data:
