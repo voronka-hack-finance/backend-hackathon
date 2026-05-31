@@ -14,6 +14,7 @@ from services.gateway.app.routers import (
     auth,
     categories,
     chats,
+    debts,
     files,
     financial_health,
     goals,
@@ -97,6 +98,7 @@ app.include_router(files.imports_router)
 app.include_router(transactions.router)
 app.include_router(accounts.router)
 app.include_router(goals.router)
+app.include_router(debts.router)
 app.include_router(limits.router)
 app.include_router(categories.router)
 app.include_router(notifications.router)

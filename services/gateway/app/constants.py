@@ -32,6 +32,7 @@ OPENAPI_TAGS = [
     {"name": "Transactions", "description": "Чтение нормализованных транзакций с фильтрами и пагинацией."},
     {"name": "Accounts", "description": "Финансовые счета пользователя (только список через публичный API)."},
     {"name": "Goals", "description": "Цели накопления: создание, просмотр, изменение и удаление."},
+    {"name": "Debts", "description": "User debts and credit obligations with CRUD, filters, and debt data for financial health scoring."},
     {"name": "Limits", "description": "Лимиты расходов по категориям и периодам."},
     {"name": "Categories", "description": "Пользовательские категории доходов и расходов."},
     {"name": "Notifications", "description": "Согласие на push, регистрация устройств FCM и тестовая отправка."},

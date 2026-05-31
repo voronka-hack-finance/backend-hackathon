@@ -42,6 +42,8 @@ Scope: remaining gaps after cleanup pass (README visuals excluded by policy)
 | README diagrams | SVG placeholders — user asked not to change README |
 | Firebase in production | Credentials via `infra/.env` or `infra/secrets/`; disable with `FIREBASE_ENABLED=false` if needed |
 | Docker smoke in CI | `RUN_DOCKER_SMOKE=1` + compose stack; optional pipeline step |
+| Alembic migration system | Plan approved — replace numbered SQL + `schema_migrations` with Alembic under `migration-service`; see `backend-plan.md` |
+| `user_debts` CRUD | Plan approved — finance-service; see `backend-plan.md` |
 
 ---
 

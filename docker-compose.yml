@@ -89,8 +89,16 @@ services:
     command: python -m services.migration_service.app.main
     environment:
       <<: *app-env
+      BOOTSTRAP_EXCEL_ENABLED: ${BOOTSTRAP_EXCEL_ENABLED:-true}
+      BOOTSTRAP_EXCEL_PATH: ${BOOTSTRAP_EXCEL_PATH:-/app/family-bugget.xlsx}
+      BOOTSTRAP_RESET_ON_START: ${BOOTSTRAP_RESET_ON_START:-true}
+      BOOTSTRAP_USER_EMAIL: ${BOOTSTRAP_USER_EMAIL:-demo@example.com}
+      BOOTSTRAP_USER_PASSWORD: ${BOOTSTRAP_USER_PASSWORD:-secret123}
+      BOOTSTRAP_USER_DISPLAY_NAME: ${BOOTSTRAP_USER_DISPLAY_NAME:-Иван Иванов}
     depends_on:
       postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     restart: "no"
 

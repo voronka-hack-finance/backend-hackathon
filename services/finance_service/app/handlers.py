@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from typing import Any
+import uuid as uuid_stdlib
 from uuid import UUID
+
+IMPORT_CATEGORY_NAMESPACE = uuid_stdlib.UUID("f47ac10b-58cc-4372-a567-0e02b2c3d479")
 
 from common.messaging import MessageError, require_user
 from sqlalchemy import Select, and_, func, or_, select, text
@@ -11,7 +14,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from services.finance_service.app.db import SessionLocal
-from services.finance_service.app.models import Account, AccountCategory, CategoryLimit, SavingsGoal, Transaction
+from services.finance_service.app.models import Account, AccountCategory, CategoryLimit, SavingsGoal, Transaction, UserDebt
 
 DECIMAL_FIELDS = {
     "operation_amount",
@@ -24,6 +27,10 @@ DECIMAL_FIELDS = {
     "limit_amount",
     "target_amount",
     "current_amount",
+    "remaining_balance",
+    "credit_limit",
+    "monthly_payment",
+    "interest_rate",
 }
 UUID_FIELDS = {"id", "user_id", "owner_user_id", "created_by_user_id", "account_id", "category_id", "family_group_id"}
 DATETIME_FIELDS = {"operation_at", "payment_at", "period_started_at", "created_at", "updated_at"}
@@ -108,6 +115,24 @@ GOAL_FIELDS = (
     "current_amount",
     "currency",
     "target_date",
+    "status",
+    "created_at",
+    "updated_at",
+)
+DEBT_FIELDS = (
+    "id",
+    "owner_user_id",
+    "account_id",
+    "title",
+    "description",
+    "debt_type",
+    "remaining_balance",
+    "credit_limit",
+    "monthly_payment",
+    "currency",
+    "payment_day",
+    "overdue_days",
+    "interest_rate",
     "status",
     "created_at",
     "updated_at",
@@ -359,6 +384,8 @@ def handle_accounts_resolve_by_card(payload: dict, envelope: dict) -> dict:
 def handle_categories_list(payload: dict, envelope: dict) -> dict:
     user_id = UUID(require_user(envelope).id)
     with SessionLocal() as db:
+        if _truthy(payload.get("include_all")):
+            return _list_categories_including_import(db, user_id, payload)
         return _list_owned(db, AccountCategory, AccountCategory.created_by_user_id, CATEGORY_FIELDS, user_id, payload)
 
 
@@ -502,6 +529,82 @@ def handle_goals_delete(payload: dict, envelope: dict) -> dict:
     return _delete_entity_response(envelope, SavingsGoal, SavingsGoal.owner_user_id, payload.get("goal_id") or payload.get("id"))
 
 
+def handle_debts_list(payload: dict, envelope: dict) -> dict:
+    user_id = UUID(require_user(envelope).id)
+    page, page_size = _page(payload)
+    status = payload.get("status") or "active"
+    debt_type = payload.get("debt_type")
+    with SessionLocal() as db:
+        stmt = select(UserDebt).where(UserDebt.owner_user_id == user_id)
+        if status:
+            _validate_choice("status", status, {"active", "closed", "deleted"})
+            stmt = stmt.where(UserDebt.status == status)
+        if debt_type:
+            _validate_choice("debt_type", debt_type, {"loan", "credit_card", "other"})
+            stmt = stmt.where(UserDebt.debt_type == debt_type)
+        total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        rows = db.scalars(
+            stmt.order_by(UserDebt.updated_at.desc(), UserDebt.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).all()
+        return {
+            "items": [_serialize(row, DEBT_FIELDS) for row in rows],
+            "pagination": {"page": page, "page_size": page_size, "total": total},
+        }
+
+
+def handle_debts_get(payload: dict, envelope: dict) -> dict:
+    return _get_entity_response(envelope, UserDebt, UserDebt.owner_user_id, DEBT_FIELDS, payload.get("debt_id") or payload.get("id"))
+
+
+def handle_debts_create(payload: dict, envelope: dict) -> dict:
+    user_id = UUID(require_user(envelope).id)
+    data = _pick(payload, DEBT_FIELDS, exclude={"id", "owner_user_id", "created_at", "updated_at"})
+    if not data.get("title") or not data.get("debt_type") or data.get("remaining_balance") is None:
+        raise MessageError(422, "title, debt_type and remaining_balance are required")
+    data["owner_user_id"] = user_id
+    data.setdefault("currency", "RUB")
+    data.setdefault("overdue_days", 0)
+    data.setdefault("status", "active")
+    _coerce_entity_data(data)
+    _validate_debt_data(data)
+    with SessionLocal() as db:
+        _validate_owned_references(db, user_id, data)
+        debt = UserDebt(**data)
+        db.add(debt)
+        db.commit()
+        db.refresh(debt)
+        return _serialize(debt, DEBT_FIELDS)
+
+
+def handle_debts_update(payload: dict, envelope: dict) -> dict:
+    user_id = UUID(require_user(envelope).id)
+    debt_id = payload.get("debt_id") or payload.get("id")
+    with SessionLocal() as db:
+        debt = _get_owned(db, UserDebt, UserDebt.owner_user_id, user_id, debt_id)
+        updates = _pick(payload, DEBT_FIELDS, exclude={"id", "owner_user_id", "created_at", "updated_at"})
+        _coerce_entity_data(updates)
+        merged = {field: getattr(debt, field) for field in DEBT_FIELDS if hasattr(debt, field)}
+        merged.update(updates)
+        _validate_debt_data(merged)
+        _validate_owned_references(db, user_id, updates)
+        for key, value in updates.items():
+            setattr(debt, key, value)
+        db.commit()
+        db.refresh(debt)
+        return _serialize(debt, DEBT_FIELDS)
+
+
+def handle_debts_delete(payload: dict, envelope: dict) -> dict:
+    user_id = UUID(require_user(envelope).id)
+    with SessionLocal() as db:
+        debt = _get_owned(db, UserDebt, UserDebt.owner_user_id, user_id, payload.get("debt_id") or payload.get("id"))
+        debt.status = "deleted"
+        db.commit()
+    return {"status": "deleted"}
+
+
 def _apply_transaction_filters(stmt: Select, *, user_id: UUID, payload: dict) -> Select:
     conditions = [Transaction.user_id == user_id]
     date_from = payload.get("date_from")
@@ -605,6 +708,81 @@ def _resolve_account(db: Session, user_id: UUID, payload: dict) -> Account:
     return account
 
 
+def _list_categories_including_import(db: Session, user_id: UUID, payload: dict) -> dict:
+    page, page_size = _page(payload)
+    include_archived = _truthy(payload.get("include_archived"))
+
+    manual_stmt = select(AccountCategory).where(AccountCategory.created_by_user_id == user_id)
+    if not include_archived:
+        manual_stmt = manual_stmt.where(AccountCategory.is_archived.is_(False))
+    manual_rows = db.scalars(manual_stmt).all()
+
+    items: list[dict] = []
+    seen_names: set[str] = set()
+    for row in manual_rows:
+        item = _serialize(row, CATEGORY_FIELDS)
+        item["source"] = "manual"
+        items.append(item)
+        seen_names.add(str(item["name"]).casefold())
+
+    import_rows = db.execute(
+        text(
+            """
+            select
+              category_name as name,
+              min(operation_at) as created_at,
+              max(operation_at) as updated_at
+            from transactions
+            where user_id = :user_id
+              and category_name is not null
+              and btrim(category_name) <> ''
+            group by category_name
+            order by category_name
+            """
+        ),
+        {"user_id": user_id},
+    ).mappings().all()
+
+    for row in import_rows:
+        name = str(row["name"])
+        if name.casefold() in seen_names:
+            continue
+        category_id = _import_category_id(user_id, name)
+        items.append(
+            {
+                "id": str(category_id),
+                "account_id": None,
+                "created_by_user_id": str(user_id),
+                "name": name,
+                "description": None,
+                "icon_key": None,
+                "is_archived": False,
+                "created_at": row["created_at"].isoformat() if row["created_at"] else datetime.now(UTC).isoformat(),
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else datetime.now(UTC).isoformat(),
+                "source": "import",
+            }
+        )
+        seen_names.add(name.casefold())
+
+    items.sort(key=lambda item: str(item["name"]).casefold())
+    total = len(items)
+    start = (page - 1) * page_size
+    page_items = items[start : start + page_size]
+    return {"items": page_items, "pagination": {"page": page, "page_size": page_size, "total": total}}
+
+
+def _import_category_id(user_id: UUID, name: str) -> UUID:
+    return uuid_stdlib.uuid5(IMPORT_CATEGORY_NAMESPACE, f"{user_id}:{name}")
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _list_owned(db: Session, model, owner_column, fields: tuple[str, ...], user_id: UUID, payload: dict) -> dict:
     page, page_size = _page(payload)
     stmt = select(model).where(owner_column == user_id)
@@ -616,7 +794,11 @@ def _list_owned(db: Session, model, owner_column, fields: tuple[str, ...], user_
     if order_column is not None:
         stmt = stmt.order_by(order_column.desc())
     rows = db.scalars(stmt.offset((page - 1) * page_size).limit(page_size)).all()
-    return {"items": [_serialize(row, fields) for row in rows], "pagination": {"page": page, "page_size": page_size, "total": total}}
+    items = [_serialize(row, fields) for row in rows]
+    if model is AccountCategory:
+        for item in items:
+            item["source"] = "manual"
+    return {"items": items, "pagination": {"page": page, "page_size": page_size, "total": total}}
 
 
 def _get_entity_response(envelope: dict, model, owner_column, fields: tuple[str, ...], entity_id: Any) -> dict:
@@ -703,6 +885,36 @@ def _validate_owned_references(db: Session, user_id: UUID, data: dict) -> None:
         )
         if not exists:
             raise MessageError(404, "Category not found")
+
+
+def _validate_debt_data(data: dict) -> None:
+    _validate_choice("debt_type", data.get("debt_type"), {"loan", "credit_card", "other"})
+    _validate_choice("status", data.get("status") or "active", {"active", "closed", "deleted"})
+    remaining_balance = _parse_decimal(data.get("remaining_balance"))
+    credit_limit = _parse_decimal(data.get("credit_limit"))
+    monthly_payment = _parse_decimal(data.get("monthly_payment"))
+    interest_rate = _parse_decimal(data.get("interest_rate"))
+    if remaining_balance is None:
+        raise MessageError(422, "remaining_balance is required")
+    if remaining_balance < 0:
+        raise MessageError(422, "remaining_balance must be greater than or equal to 0")
+    if str(data.get("debt_type")) == "credit_card" and (credit_limit is None or credit_limit <= 0):
+        raise MessageError(422, "credit_limit is required and must be greater than 0 for credit_card debts")
+    if monthly_payment is not None and monthly_payment < 0:
+        raise MessageError(422, "monthly_payment must be greater than or equal to 0")
+    if interest_rate is not None and interest_rate < 0:
+        raise MessageError(422, "interest_rate must be greater than or equal to 0")
+    payment_day = data.get("payment_day")
+    if payment_day is not None and not 1 <= int(payment_day) <= 31:
+        raise MessageError(422, "payment_day must be between 1 and 31")
+    overdue_days = data.get("overdue_days")
+    if overdue_days is not None and int(overdue_days) < 0:
+        raise MessageError(422, "overdue_days must be greater than or equal to 0")
+
+
+def _validate_choice(field: str, value: Any, choices: set[str]) -> None:
+    if value not in choices:
+        raise MessageError(422, f"{field} must be one of: {', '.join(sorted(choices))}")
 
 
 def _assign(row, updates: dict) -> None:
@@ -857,4 +1069,9 @@ MESSAGE_HANDLERS = {
     "goals.create": handle_goals_create,
     "goals.update": handle_goals_update,
     "goals.delete": handle_goals_delete,
+    "debts.list": handle_debts_list,
+    "debts.get": handle_debts_get,
+    "debts.create": handle_debts_create,
+    "debts.update": handle_debts_update,
+    "debts.delete": handle_debts_delete,
 }

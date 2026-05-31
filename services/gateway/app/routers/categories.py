@@ -37,8 +37,17 @@ def categories_list(
     user: UserContext = Depends(current_user),
     page: int = Query(default=1, ge=1, description="Номер страницы."),
     page_size: int = Query(default=50, ge=1, le=500, description="Размер страницы."),
+    include_all: bool = Query(
+        default=False,
+        description="Если true — вернуть и категории из импорта (distinct category_name в транзакциях), не только созданные вручную.",
+    ),
 ) -> dict:
-    return rpc_call(FINANCE_QUEUE, "categories.list", {"page": page, "page_size": page_size}, user=user)
+    return rpc_call(
+        FINANCE_QUEUE,
+        "categories.list",
+        {"page": page, "page_size": page_size, "include_all": include_all},
+        user=user,
+    )
 
 
 @router.post(

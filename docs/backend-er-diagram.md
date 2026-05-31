@@ -28,6 +28,8 @@ erDiagram
     ACCOUNTS ||--o{ ACCOUNT_CATEGORIES : has
     ACCOUNTS ||--o{ CATEGORY_LIMITS : has
     ACCOUNTS ||--o{ SAVINGS_GOALS : has
+    USERS ||--o{ USER_DEBTS : has
+    ACCOUNTS ||--o{ USER_DEBTS : may_link
     ACCOUNT_CATEGORIES ||--o{ TRANSACTIONS : classifies
     ACCOUNT_CATEGORIES ||--o{ CATEGORY_LIMITS : limited_by
     UPLOADED_FILES ||--o{ TRANSACTIONS : sources
@@ -211,17 +213,40 @@ erDiagram
         datetime updated_at
     }
 
+    USER_DEBTS {
+        uuid id PK
+        uuid owner_user_id FK
+        uuid account_id FK
+        string title
+        string description
+        string debt_type
+        decimal remaining_balance
+        decimal credit_limit
+        decimal monthly_payment
+        string currency
+        integer payment_day
+        integer overdue_days
+        decimal interest_rate
+        string status
+        datetime created_at
+        datetime updated_at
+    }
+
     REGULAR_EXPENSES {
         uuid id PK
         uuid user_id FK
         uuid account_id FK
         uuid category_id FK
+        string title
+        string description
         string merchant_pattern
+        decimal expected_amount
         decimal average_amount
         string currency
         integer frequency_days
         datetime next_expected_at
         decimal confidence
+        string source_type
         string status
         datetime created_at
         datetime updated_at
@@ -400,6 +425,7 @@ erDiagram
 | `account_categories` | finance-service |
 | `category_limits` | finance-service |
 | `savings_goals` | finance-service |
+| `user_debts` | finance-service |
 | `regular_expenses` | analytics-service |
 | `expected_incomes` | analytics-service |
 | `expected_expenses` | analytics-service |
@@ -414,15 +440,17 @@ erDiagram
 | `chats` | chat-service |
 | `chat_messages` | chat-service |
 | `agent_recommendations` | chat-service |
-| `schema_migrations` | migration-service |
+| `schema_migrations` / `alembic_version` | migration-service (legacy → Alembic) |
 | `bucket_bootstrap_runs` | create-bucket-service |
 
 ## Comments
 
 - `access-service` owns identity and token/session data only.
 - `file-service` owns original file lifecycle and import status. It can create/reuse accounts and insert imported transactions as part of import.
-- `finance-service` owns user-facing finance CRUD/read behavior for accounts, transactions, goals, limits, and categories.
-- `analytics-service` stores derived records. Its results are not the source of truth for transactions.
+- `finance-service` owns user-facing finance CRUD/read behavior for accounts, transactions, goals, limits, categories, and user debts.
+- `analytics-service` stores derived records and user-maintained forecast inputs. `regular_expenses` covers both automatically detected recurring expenses and manual records like subscriptions, rent, and utilities.
+- `regular_expenses.source_type` should distinguish `detected`, `manual`, and `user_adjusted` records so automatic detection does not overwrite user edits.
+- `regular_expenses.expected_amount` is the user-facing planned amount; `average_amount` can be filled by detection from transaction history.
 - `scheduler-service` plans reminders, but `notification-service` sends them.
 - `group-service` owns family membership and invitation state.
 - `chat-service` owns recommendations/chats, but should request finance/analytics context through RabbitMQ instead of reading their tables directly.
@@ -448,6 +476,8 @@ transactions(user_id, import_id, dedupe_key) unique
 account_categories(account_id, name)
 category_limits(account_id, category_id)
 savings_goals(account_id, status)
+user_debts(owner_user_id, status)
+user_debts(owner_user_id, debt_type)
 regular_expenses(user_id, account_id, next_expected_at)
 expected_incomes(user_id, expected_at)
 expected_expenses(user_id, expected_at)

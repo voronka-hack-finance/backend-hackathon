@@ -207,6 +207,10 @@ class CategoryResponse(BaseModel):
     is_archived: bool
     created_at: datetime
     updated_at: datetime
+    source: Literal["manual", "import"] = Field(
+        default="manual",
+        description="manual — created in app; import — distinct category_name from transactions.",
+    )
 
 
 class CategoryCreateRequest(BaseModel):
@@ -293,6 +297,81 @@ class GoalUpdateRequest(BaseModel):
     status: str | None = None
 
 
+class DebtResponse(BaseModel):
+    id: UUID = Field(description="Debt identifier.")
+    owner_user_id: UUID = Field(description="Owner user identifier from JWT scope.")
+    account_id: UUID | None = Field(default=None, description="Optional linked account identifier.")
+    title: str = Field(description="Debt title shown to the user.")
+    description: str | None = Field(default=None, description="Optional debt description.")
+    debt_type: Literal["loan", "credit_card", "other"] = Field(description="Debt type.")
+    remaining_balance: str = Field(description="Remaining balance as a decimal string.")
+    credit_limit: str | None = Field(default=None, description="Credit limit as a decimal string. Required for credit_card.")
+    monthly_payment: str | None = Field(default=None, description="Monthly payment as a decimal string.")
+    currency: str = Field(description="Debt currency.")
+    payment_day: int | None = Field(default=None, ge=1, le=31, description="Payment day of month.")
+    overdue_days: int = Field(ge=0, description="Current overdue days, maintained by the user.")
+    interest_rate: str | None = Field(default=None, description="Annual interest rate as a decimal string.")
+    status: Literal["active", "closed", "deleted"] = Field(description="Debt lifecycle status.")
+    created_at: datetime = Field(description="Creation timestamp.")
+    updated_at: datetime = Field(description="Last update timestamp.")
+
+
+class DebtCreateRequest(BaseModel):
+    title: str = Field(description="Debt title shown to the user.")
+    debt_type: Literal["loan", "credit_card", "other"] = Field(description="Debt type.")
+    remaining_balance: str = Field(description="Remaining balance as a decimal string.")
+    account_id: UUID | None = Field(default=None, description="Optional linked account identifier.")
+    description: str | None = Field(default=None, description="Optional debt description.")
+    credit_limit: str | None = Field(default=None, description="Credit limit. Required and greater than 0 for credit_card.")
+    monthly_payment: str | None = Field(default=None, description="Monthly payment as a decimal string.")
+    currency: str = Field(default="RUB", description="Debt currency.")
+    payment_day: int | None = Field(default=None, ge=1, le=31, description="Payment day of month.")
+    overdue_days: int = Field(default=0, ge=0, description="Current overdue days.")
+    interest_rate: str | None = Field(default=None, description="Annual interest rate as a decimal string.")
+    status: Literal["active", "closed", "deleted"] = Field(default="active", description="Initial debt status.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "title": "Mortgage",
+                "debt_type": "loan",
+                "remaining_balance": "2500000.00",
+                "monthly_payment": "45000.00",
+                "currency": "RUB",
+                "payment_day": 10,
+                "overdue_days": 0,
+                "interest_rate": "10.5000",
+                "status": "active",
+            }
+        }
+    }
+
+
+class DebtUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, description="Debt title shown to the user.")
+    debt_type: Literal["loan", "credit_card", "other"] | None = Field(default=None, description="Debt type.")
+    remaining_balance: str | None = Field(default=None, description="Remaining balance as a decimal string.")
+    account_id: UUID | None = Field(default=None, description="Optional linked account identifier.")
+    description: str | None = Field(default=None, description="Optional debt description.")
+    credit_limit: str | None = Field(default=None, description="Credit limit. Required and greater than 0 for credit_card.")
+    monthly_payment: str | None = Field(default=None, description="Monthly payment as a decimal string.")
+    currency: str | None = Field(default=None, description="Debt currency.")
+    payment_day: int | None = Field(default=None, ge=1, le=31, description="Payment day of month.")
+    overdue_days: int | None = Field(default=None, ge=0, description="Current overdue days.")
+    interest_rate: str | None = Field(default=None, description="Annual interest rate as a decimal string.")
+    status: Literal["active", "closed", "deleted"] | None = Field(default=None, description="Debt lifecycle status.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "remaining_balance": "2450000.00",
+                "monthly_payment": "46000.00",
+                "overdue_days": 0,
+            }
+        }
+    }
+
+
 class AccountsPageResponse(BaseModel):
     items: list[AccountResponse]
     pagination: PaginationResponse
@@ -310,6 +389,11 @@ class LimitsPageResponse(BaseModel):
 
 class GoalsPageResponse(BaseModel):
     items: list[GoalResponse]
+    pagination: PaginationResponse
+
+
+class DebtsPageResponse(BaseModel):
+    items: list[DebtResponse] = Field(description="Current user's debts.")
     pagination: PaginationResponse
 
 
@@ -404,6 +488,81 @@ class ExpectedIncomesPageResponse(BaseModel):
 
 class ExpectedExpensesPageResponse(BaseModel):
     items: list[ExpectedExpenseResponse] = Field(description="Expected or derived expenses.")
+    pagination: PaginationResponse
+
+
+class RegularExpenseResponse(BaseModel):
+    id: UUID = Field(description="Regular expense identifier.")
+    account_id: UUID | None = Field(default=None, description="Linked account id. If null, analytics-service assigns one existing account owned by the user.")
+    category_id: UUID | None = Field(default=None, description="Linked category id. If null, analytics-service uses or creates the user's 'Другое' category.")
+    merchant_pattern: str = Field(description="Merchant or payment pattern, for example Netflix, rent, or utilities.")
+    average_amount: str = Field(description="Detected or fallback average amount as a decimal string.")
+    expected_amount: str | None = Field(default=None, description="User-facing planned amount as a decimal string.")
+    currency: str = Field(description="Expense currency.")
+    frequency_days: int = Field(description="Expected recurrence frequency in days.")
+    next_expected_at: datetime | None = Field(default=None, description="Next expected charge timestamp.")
+    confidence: str = Field(description="Detection confidence as a decimal string.")
+    status: str = Field(description="Record status, usually active, paused, or deleted.")
+    source_type: str = Field(description="Record source: detected, manual, or user_adjusted.")
+    created_at: datetime = Field(description="Creation timestamp.")
+    updated_at: datetime = Field(description="Last update timestamp.")
+
+
+class RegularExpenseCreateRequest(BaseModel):
+    merchant_pattern: str = Field(description="Merchant or payment pattern, for example Netflix, rent, or utilities.")
+    expected_amount: str = Field(description="User-facing planned amount as a decimal string.")
+    average_amount: str | None = Field(default=None, description="Optional detected average amount as a decimal string.")
+    account_id: UUID | None = Field(default=None, description="Optional linked account.")
+    category_id: UUID | None = Field(default=None, description="Optional linked category.")
+    currency: str = Field(default="RUB", description="Expense currency.")
+    frequency_days: int = Field(default=30, ge=1, description="Expected recurrence frequency in days.")
+    next_expected_at: datetime | None = Field(default=None, description="Next expected charge timestamp.")
+    status: str = Field(default="active", description="Initial record status.")
+    source_type: Literal["manual", "detected", "user_adjusted"] = Field(default="manual", description="Record source.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "merchant_pattern": "Apartment rent",
+                "expected_amount": "45000.00",
+                "account_id": None,
+                "category_id": None,
+                "currency": "RUB",
+                "frequency_days": 30,
+                "next_expected_at": "2026-06-05T09:00:00+00:00",
+                "status": "active",
+                "source_type": "manual",
+            }
+        }
+    }
+
+
+class RegularExpenseUpdateRequest(BaseModel):
+    merchant_pattern: str | None = Field(default=None, description="Merchant or payment pattern.")
+    expected_amount: str | None = Field(default=None, description="User-facing planned amount as a decimal string.")
+    average_amount: str | None = Field(default=None, description="Detected average amount as a decimal string.")
+    account_id: UUID | None = Field(default=None, description="Linked account id. If explicitly set to null, analytics-service assigns one existing account owned by the user.")
+    category_id: UUID | None = Field(default=None, description="Linked category id. If explicitly set to null, analytics-service uses or creates the user's 'Другое' category.")
+    currency: str | None = Field(default=None, description="Expense currency.")
+    frequency_days: int | None = Field(default=None, ge=1, description="Expected recurrence frequency in days.")
+    next_expected_at: datetime | None = Field(default=None, description="Next expected charge timestamp.")
+    status: str | None = Field(default=None, description="Record status, usually active, paused, or deleted.")
+    source_type: Literal["manual", "detected", "user_adjusted"] | None = Field(default=None, description="Record source.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "expected_amount": "47000.00",
+                "account_id": None,
+                "category_id": None,
+                "status": "paused",
+            }
+        }
+    }
+
+
+class RegularExpensesPageResponse(BaseModel):
+    items: list[RegularExpenseResponse] = Field(description="Regular expenses owned by the current user.")
     pagination: PaginationResponse
 
 
