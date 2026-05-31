@@ -14,6 +14,13 @@ class RedisSettings(BaseSettings):
     redis_port: int = Field(default=6379, validation_alias="REDIS_PORT")
     redis_enabled: bool = Field(default=True, validation_alias="REDIS_ENABLED")
     redis_idempotency_ttl_seconds: int = Field(default=86400, validation_alias="REDIS_IDEMPOTENCY_TTL_SECONDS")
+    redis_health_cache_ttl_seconds: int = Field(default=21600, validation_alias="REDIS_HEALTH_CACHE_TTL_SECONDS")
+    redis_analytics_cache_ttl_seconds: int = Field(default=3600, validation_alias="REDIS_ANALYTICS_CACHE_TTL_SECONDS")
+    redis_auth_verify_ttl_seconds: int = Field(default=60, validation_alias="REDIS_AUTH_VERIFY_TTL_SECONDS")
+    redis_auth_verify_ttl_max_seconds: int = Field(default=120, validation_alias="REDIS_AUTH_VERIFY_TTL_MAX_SECONDS")
+    redis_import_lock_ttl_seconds: int = Field(default=600, validation_alias="REDIS_IMPORT_LOCK_TTL_SECONDS")
+    redis_detect_lock_ttl_seconds: int = Field(default=300, validation_alias="REDIS_DETECT_LOCK_TTL_SECONDS")
+    redis_detect_debounce_hours: int = Field(default=6, validation_alias="REDIS_DETECT_DEBOUNCE_HOURS")
 
     model_config = SettingsConfigDict(extra="ignore")
 

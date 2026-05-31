@@ -9,6 +9,7 @@ from uuid import UUID
 IMPORT_CATEGORY_NAMESPACE = uuid_stdlib.UUID("f47ac10b-58cc-4372-a567-0e02b2c3d479")
 
 from common.messaging import MessageError, require_user
+from common.redis_cache import bump_user_data_version
 from sqlalchemy import Select, and_, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
@@ -172,7 +173,9 @@ def handle_transactions_create(payload: dict, envelope: dict) -> dict:
         db.add(transaction)
         db.commit()
         db.refresh(transaction)
-        return _serialize(transaction, TRANSACTION_FIELDS)
+        result = _serialize(transaction, TRANSACTION_FIELDS)
+    bump_user_data_version(str(user_id))
+    return result
 
 
 def handle_transactions_update(payload: dict, envelope: dict) -> dict:
@@ -184,7 +187,9 @@ def handle_transactions_update(payload: dict, envelope: dict) -> dict:
         _assign(transaction, updates)
         db.commit()
         db.refresh(transaction)
-        return _serialize(transaction, TRANSACTION_FIELDS)
+        result = _serialize(transaction, TRANSACTION_FIELDS)
+    bump_user_data_version(str(user_id))
+    return result
 
 
 def handle_transactions_delete(payload: dict, envelope: dict) -> dict:
@@ -193,6 +198,7 @@ def handle_transactions_delete(payload: dict, envelope: dict) -> dict:
         transaction = _get_owned(db, Transaction, Transaction.user_id, user_id, payload.get("transaction_id") or payload.get("id"))
         db.delete(transaction)
         db.commit()
+    bump_user_data_version(str(user_id))
     return {"status": "deleted"}
 
 
@@ -209,7 +215,10 @@ def handle_transactions_bulk_create(payload: dict, envelope: dict) -> dict:
         stmt = stmt.on_conflict_do_nothing(index_elements=["user_id", "dedupe_key"])
         result = db.execute(stmt)
         db.commit()
-        return {"received": len(rows), "inserted": result.rowcount or 0}
+        response = {"received": len(rows), "inserted": result.rowcount or 0}
+    if response["inserted"]:
+        bump_user_data_version(str(user_id))
+    return response
 
 
 def handle_transactions_sum_by_scope(payload: dict, envelope: dict) -> dict:
@@ -575,7 +584,9 @@ def handle_debts_create(payload: dict, envelope: dict) -> dict:
         db.add(debt)
         db.commit()
         db.refresh(debt)
-        return _serialize(debt, DEBT_FIELDS)
+        result = _serialize(debt, DEBT_FIELDS)
+    bump_user_data_version(str(user_id))
+    return result
 
 
 def handle_debts_update(payload: dict, envelope: dict) -> dict:
@@ -593,7 +604,9 @@ def handle_debts_update(payload: dict, envelope: dict) -> dict:
             setattr(debt, key, value)
         db.commit()
         db.refresh(debt)
-        return _serialize(debt, DEBT_FIELDS)
+        result = _serialize(debt, DEBT_FIELDS)
+    bump_user_data_version(str(user_id))
+    return result
 
 
 def handle_debts_delete(payload: dict, envelope: dict) -> dict:
@@ -602,6 +615,7 @@ def handle_debts_delete(payload: dict, envelope: dict) -> dict:
         debt = _get_owned(db, UserDebt, UserDebt.owner_user_id, user_id, payload.get("debt_id") or payload.get("id"))
         debt.status = "deleted"
         db.commit()
+    bump_user_data_version(str(user_id))
     return {"status": "deleted"}
 
 
@@ -817,7 +831,10 @@ def _create_entity(model, fields: tuple[str, ...], data: dict, *, owner_user_id:
         db.add(row)
         db.commit()
         db.refresh(row)
-        return _serialize(row, fields)
+        result = _serialize(row, fields)
+    if owner_user_id is not None:
+        bump_user_data_version(str(owner_user_id))
+    return result
 
 
 def _update_entity_response(
@@ -836,7 +853,9 @@ def _update_entity_response(
         _validate_owned_references(db, user_id, updates)
         db.commit()
         db.refresh(row)
-        return _serialize(row, fields)
+        result = _serialize(row, fields)
+    bump_user_data_version(str(user_id))
+    return result
 
 
 def _delete_entity_response(envelope: dict, model, owner_column, entity_id: Any) -> dict:
@@ -850,6 +869,7 @@ def _delete_entity_response(envelope: dict, model, owner_column, entity_id: Any)
         else:
             db.delete(row)
         db.commit()
+    bump_user_data_version(str(user_id))
     return {"status": "deleted"}
 
 

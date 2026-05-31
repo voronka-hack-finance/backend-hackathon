@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from services.migration_service.app import bootstrap
 from services.migration_service.app.config import Settings
+from services.migration_service.app import main as migration_main
 from services.migration_service.app import reset
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +48,50 @@ def test_reset_skips_when_disabled():
     with patch.object(reset.settings, "bootstrap_reset_on_start", False):
         reset.reset_application_data(engine)
     engine.connect.assert_not_called()
+
+
+def test_reset_preserves_alembic_version_table():
+    assert reset.PRESERVED_TABLES == frozenset({"alembic_version"})
+
+
+def test_migration_service_uses_alembic_runner():
+    assert not hasattr(migration_main, "_apply_migrations")
+    assert migration_main.ALEMBIC_INI.name == "alembic.ini"
+    assert migration_main.BASELINE_REVISION == "0001_initial_schema"
+
+
+def test_legacy_bridge_detects_schema_migrations_without_alembic_version():
+    engine = MagicMock()
+    conn = engine.begin.return_value.__enter__.return_value
+    conn.scalar.side_effect = [True, 3, False]
+
+    assert migration_main._needs_legacy_bridge(engine) is True
+
+
+def test_legacy_bridge_skips_when_alembic_version_exists():
+    engine = MagicMock()
+    conn = engine.begin.return_value.__enter__.return_value
+    conn.scalar.side_effect = [True, 3, True, 1]
+
+    assert migration_main._needs_legacy_bridge(engine) is False
+
+
+def test_alembic_scaffold_exists():
+    service_dir = Path("services/migration_service")
+    versions = sorted((service_dir / "alembic" / "versions").glob("*.py"))
+
+    assert (service_dir / "alembic.ini").is_file()
+    assert (service_dir / "alembic" / "env.py").is_file()
+    assert (service_dir / "alembic" / "script.py.mako").is_file()
+    assert [path.stem for path in versions] == [
+        "0001_initial_schema",
+        "0002_expanded_plan",
+        "0003_bucket_policy_state",
+        "0004_transaction_dedupe",
+        "0005_health_score_service",
+        "0006_regular_expenses_manual_crud",
+        "0007_user_debts",
+    ]
 
 
 def test_parser_reads_sample_file_for_bootstrap_contract():

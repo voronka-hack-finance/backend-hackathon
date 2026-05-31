@@ -524,13 +524,20 @@ Authoritative decision: PostgreSQL schema evolution moves from hand-written numb
 
 All services continue to share one PostgreSQL database. Schema ownership stays centralized in `migration-service`; individual services keep SQLAlchemy models as the declared shape of their tables.
 
-### Current state (legacy, to be retired)
+### Current state (Alembic cutover implemented)
 
 | Piece | Location | Notes |
 |-------|----------|-------|
 | SQL files | `services/migration_service/migrations/*.sql` | Sorted by filename (`000_…`, `005_…`, …) |
-| Runner | `services/migration_service/app/main.py` → `_apply_migrations()` | Executes whole files once |
-| Tracking | `schema_migrations(version text PK)` | Custom table, not Alembic |
+| Runner | `services/migration_service/app/main.py` | Runs `alembic upgrade head` through Alembic API |
+| Tracking | `alembic_version(version_num)` | Alembic standard table |
+| Legacy SQL archive | `services/migration_service/migrations/*.sql` | Retained as baseline source, not as the active runner |
+
+Implementation note: the cutover is now implemented in code. The active runner uses
+`services/migration_service/alembic.ini`, revision files under
+`services/migration_service/alembic/versions/`, and Alembic's
+`alembic_version(version_num)` table. The legacy SQL directory is retained only as
+archived baseline source and is not the startup migration runner anymore.
 
 ### Target layout
 

@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from common.messaging import MessageError
+from common.redis_cache import get_auth_verify_cache
 from common.security import TokenDecodeError, create_access_token, decode_access_token
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -152,7 +153,10 @@ def handle_change_password(payload: dict, envelope: dict) -> dict:
             .values(status="revoked", revoked_at=datetime.now(UTC))
         )
         db.commit()
-        return {"status": "ok"}
+    auth_cache = get_auth_verify_cache()
+    if auth_cache is not None:
+        auth_cache.invalidate_user(str(user_id))
+    return {"status": "ok"}
 
 
 def handle_verify_token(payload: dict, envelope: dict) -> dict:
@@ -166,7 +170,11 @@ def handle_verify_token(payload: dict, envelope: dict) -> dict:
         user = db.get(User, user_id)
         if user is None:
             raise MessageError(401, "User not found")
-        return {"user": _user_payload(user), "auth": {"scopes": []}}
+        exp = claims.get("exp")
+        return {
+            "user": _user_payload(user),
+            "auth": {"scopes": [], "exp": int(exp) if exp is not None else None},
+        }
 
 
 def handle_users_get(payload: dict, envelope: dict) -> dict:

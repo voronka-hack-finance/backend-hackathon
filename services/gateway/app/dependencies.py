@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from common.messaging import UserContext, check_rabbitmq
+from common.redis_cache import get_auth_verify_cache
 from common.redis_client import check_redis
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -21,12 +22,27 @@ def current_user(
 ) -> UserContext:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Bearer token")
+    token = credentials.credentials
+    auth_cache = get_auth_verify_cache()
+    if auth_cache is not None:
+        cached = auth_cache.get(token)
+        if cached is not None:
+            return _user_context_from_verify_payload(cached)
     payload = rpc_call(
         ACCESS_QUEUE,
         "auth.verify_token",
-        {"token": credentials.credentials},
+        {"token": token},
         timeout_seconds=settings.rpc_timeout_seconds,
     )
+    if auth_cache is not None:
+        auth = payload.get("auth") or {}
+        ttl = auth_cache.ttl_from_auth(auth)
+        if ttl > 0:
+            auth_cache.set(token, payload, ttl_seconds=ttl)
+    return _user_context_from_verify_payload(payload)
+
+
+def _user_context_from_verify_payload(payload: dict) -> UserContext:
     user = payload.get("user") or {}
     user_id = user.get("id") or user.get("user_id")
     if not user_id:

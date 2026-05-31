@@ -7,6 +7,13 @@ from typing import Any
 from uuid import UUID
 
 from common.messaging import MessageError, UserContext, require_user
+from common.redis_cache import (
+    get_json_cache,
+    get_user_data_version,
+    health_profile_cache_key,
+    health_profile_ttl_seconds,
+)
+from common.redis_client import get_redis_settings
 from sqlalchemy import text
 
 from services.health_score_service.app.runtime import ANALYTICS_QUEUE, FINANCE_QUEUE, SessionLocal, bus
@@ -23,11 +30,21 @@ def handle_profile_get(payload: dict, envelope: dict) -> dict:
     user = require_user(envelope)
     period = _period(payload.get("period"))
     refresh = bool(payload.get("refresh"))
+    cache = get_json_cache()
+    version = get_user_data_version().get(user.id) if get_user_data_version() else 0
+    if not refresh and cache is not None:
+        redis_cached = cache.get(health_profile_cache_key(user.id, period, version))
+        if redis_cached is not None:
+            return redis_cached
     if not refresh:
         cached = _load_snapshot(UUID(user.id), period)
         if cached is not None:
+            _store_profile_cache(user.id, period, version, cached)
             return cached
-    return _calculate_and_store(UserContext(id=user.id, email=user.email), period)
+    profile = _calculate_and_store(UserContext(id=user.id, email=user.email), period)
+    current_version = get_user_data_version().get(user.id) if get_user_data_version() else version
+    _store_profile_cache(user.id, period, current_version, profile)
+    return profile
 
 
 def handle_score_get(payload: dict, envelope: dict) -> dict:
@@ -294,6 +311,17 @@ def _load_snapshot(user_id: UUID, period: str) -> dict | None:
             {"user_id": user_id, "period": period},
         ).mappings().first()
     return dict(row["profile_json"]) if row else None
+
+
+def _store_profile_cache(user_id: str, period: str, version: int, profile: dict) -> None:
+    cache = get_json_cache()
+    if cache is None:
+        return
+    cache.set(
+        health_profile_cache_key(user_id, period, version),
+        profile,
+        ttl_seconds=health_profile_ttl_seconds(get_redis_settings(), period),
+    )
 
 
 def _store_snapshot(user_id: UUID, period: str, profile: dict) -> None:

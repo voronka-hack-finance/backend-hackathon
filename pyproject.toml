@@ -20,6 +20,7 @@ dependencies = [
   "redis>=5.0.8",
   "email-validator>=2.2.0",
   "firebase-admin>=6.5.0",
+  "alembic>=1.13.0",
 ]
 
 [project.optional-dependencies]

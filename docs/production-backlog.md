@@ -32,6 +32,8 @@ Scope: remaining gaps after cleanup pass (README visuals excluded by policy)
 | Negative JWT / bus publish / idempotency tests | `tests/test_security.py`, `test_messaging_publish.py`, `test_message_idempotency.py` |
 | Gateway `/ready` Redis | `check_gateway_ready()` calls `check_redis()` |
 | Firebase + device tokens | `libs/common/common/firebase_config.py`, `notification-service` env, `GET/POST /api/v1/notifications/devices` |
+| Alembic migration system | `migration-service` runs Alembic `upgrade head`, tracks `alembic_version`, and bridges/removes legacy `schema_migrations` |
+| `user_debts` CRUD | Finance RPC + gateway `/api/v1/debts` CRUD with Swagger schemas and protected user scope |
 
 ---
 
@@ -42,8 +44,6 @@ Scope: remaining gaps after cleanup pass (README visuals excluded by policy)
 | README diagrams | SVG placeholders — user asked not to change README |
 | Firebase in production | Credentials via `infra/.env` or `infra/secrets/`; disable with `FIREBASE_ENABLED=false` if needed |
 | Docker smoke in CI | `RUN_DOCKER_SMOKE=1` + compose stack; optional pipeline step |
-| Alembic migration system | Plan approved — replace numbered SQL + `schema_migrations` with Alembic under `migration-service`; see `backend-plan.md` |
-| `user_debts` CRUD | Plan approved — finance-service; see `backend-plan.md` |
 
 ---
 

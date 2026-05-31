@@ -11,7 +11,7 @@ from services.migration_service.app.config import settings
 
 logger = logging.getLogger(__name__)
 
-PRESERVED_TABLES = frozenset({"schema_migrations"})
+PRESERVED_TABLES = frozenset({"alembic_version"})
 
 
 def reset_application_data(engine: Engine) -> None:

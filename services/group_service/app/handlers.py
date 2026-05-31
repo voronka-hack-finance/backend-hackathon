@@ -5,6 +5,13 @@ from typing import Any
 from uuid import UUID
 from sqlalchemy import text
 from common.messaging import MessageError, UserContext, require_user
+from common.redis_cache import (
+    get_json_cache,
+    get_redis_settings,
+    group_budget_cache_key,
+    max_user_data_version,
+    members_hash,
+)
 from services.group_service.app.runtime import (
     engine,
     ANALYTICS_QUEUE,
@@ -112,6 +119,9 @@ def handle_groups_delete(payload: dict, envelope: dict) -> dict:
 def handle_groups_budget_get(payload: dict, envelope: dict) -> dict:
     user_id = UUID(require_user(envelope).id)
     group_id = UUID(str(payload.get("group_id") or payload.get("id")))
+    refresh = bool(payload.get("refresh"))
+    period_start = str(payload.get("period_start") or "")
+    period_end = str(payload.get("period_end") or "")
     with engine.connect() as connection:
         group = _get_group(connection, group_id, user_id)
         members = connection.execute(
@@ -125,6 +135,16 @@ def handle_groups_budget_get(payload: dict, envelope: dict) -> dict:
             ),
             {"group_id": group_id},
         ).mappings().all()
+
+    member_user_ids = [str(row["user_id"]) for row in members]
+    members_digest = members_hash(member_user_ids)
+    cache_version = max_user_data_version(member_user_ids)
+    cache = get_json_cache()
+    cache_key = group_budget_cache_key(str(group_id), period_start, period_end, members_digest, cache_version)
+    if not refresh and cache is not None:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
 
     member_payloads = []
     totals = {
@@ -141,7 +161,6 @@ def handle_groups_budget_get(payload: dict, envelope: dict) -> dict:
         }.items()
         if value
     }
-    member_user_ids = [str(row["user_id"]) for row in members]
     budgets_by_user: dict[str, dict] = {}
     if member_user_ids:
         reply = bus.request(
@@ -177,7 +196,7 @@ def handle_groups_budget_get(payload: dict, envelope: dict) -> dict:
             member["budget_error"] = "analytics-service error"
         member_payloads.append(member)
 
-    return {
+    result = {
         "group": _serialize(group),
         "members": member_payloads,
         "summary": {
@@ -188,6 +207,9 @@ def handle_groups_budget_get(payload: dict, envelope: dict) -> dict:
             "available_amount": format(totals["available_amount"], "f"),
         },
     }
+    if cache is not None:
+        cache.set(cache_key, result, ttl_seconds=get_redis_settings().redis_analytics_cache_ttl_seconds)
+    return result
 
 
 def handle_members_list(payload: dict, envelope: dict) -> dict:

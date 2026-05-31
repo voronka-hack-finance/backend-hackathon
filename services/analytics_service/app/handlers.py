@@ -9,6 +9,14 @@ from typing import Any
 from uuid import UUID
 from sqlalchemy import text
 from common.messaging import MessageError, UserContext, require_user
+from common.redis_cache import (
+    analytics_balance_cache_key,
+    bump_user_data_version,
+    get_detect_debounce,
+    get_json_cache,
+    get_redis_settings,
+    get_user_data_version,
+)
 from services.analytics_service.app.runtime import (
     SessionLocal,
     FINANCE_QUEUE,
@@ -19,6 +27,16 @@ def handle_available_balance(payload: dict, envelope: dict) -> dict:
     user_id = UUID(require_user(envelope).id)
     period_start = _parse_date(payload.get("period_start")) or date.today()
     period_end = _parse_date(payload.get("period_end")) or period_start
+    refresh = bool(payload.get("refresh"))
+    cache = get_json_cache()
+    version_store = get_user_data_version()
+    version = version_store.get(str(user_id)) if version_store else 0
+    cache_key = analytics_balance_cache_key(user_id, period_start, period_end, version)
+    if not refresh and cache is not None:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
     with SessionLocal() as db:
         actual_decimal = _actual_balance_at_period_start(db, user_id, period_start)
         income_decimal = _expected_income_total(db, user_id, period_start, period_end)
@@ -52,7 +70,7 @@ def handle_available_balance(payload: dict, envelope: dict) -> dict:
             },
         )
         db.commit()
-    return {
+    result = {
         "period_start": period_start.isoformat(),
         "period_end": period_end.isoformat(),
         "actual_balance": _decimal_str(actual_decimal),
@@ -62,61 +80,84 @@ def handle_available_balance(payload: dict, envelope: dict) -> dict:
         "currency": "RUB",
         "calculated_at": calculated_at.isoformat(),
     }
+    if cache is not None:
+        current_version = version_store.get(str(user_id)) if version_store else version
+        cache.set(
+            analytics_balance_cache_key(user_id, period_start, period_end, current_version),
+            result,
+            ttl_seconds=get_redis_settings().redis_analytics_cache_ttl_seconds,
+        )
+    return result
 
 
 def handle_regular_expenses_detect(payload: dict, envelope: dict) -> dict:
     user = require_user(envelope)
     user_id = UUID(user.id)
-    min_occurrences = max(int(payload.get("min_occurrences") or 2), 2)
-    limit = min(max(int(payload.get("limit") or 25), 1), 100)
-    finance_reply = _finance_request(
-        "finance.expense_pattern_candidates",
-        {"min_occurrences": min_occurrences, "limit": limit},
-        user,
-    )
-    candidates = (finance_reply.get("payload") or {}).get("items") or []
-    created = 0
-    with SessionLocal() as db:
-        for candidate in candidates:
-            exists = db.scalar(
-                text(
-                    """
-                    select 1
-                    from regular_expenses
-                    where user_id = :user_id
-                      and merchant_pattern = :merchant_pattern
-                      and status = 'active'
-                    """
-                ),
-                {"user_id": user_id, "merchant_pattern": candidate["merchant_pattern"]},
-            )
-            if exists:
-                continue
-            db.execute(
-                text(
-                    """
-                    insert into regular_expenses(
-                      user_id, merchant_pattern, average_amount, expected_amount, currency,
-                      frequency_days, next_expected_at, confidence, status, source_type
-                    )
-                    values (
-                      :user_id, :merchant_pattern, :average_amount, :average_amount, :currency,
-                      30, :next_expected_at, least(0.9500, cast(:occurrences as numeric) / 12.0), 'active', 'detected'
-                    )
-                    """
-                ),
-                {
-                    "user_id": user_id,
-                    "merchant_pattern": candidate["merchant_pattern"],
-                    "average_amount": candidate["average_amount"],
-                    "currency": candidate["currency"],
-                    "next_expected_at": _parse_datetime(candidate["next_expected_at"]),
-                    "occurrences": candidate["occurrences"],
-                },
-            )
-            created += 1
-        db.commit()
-    return {"status": "detected", "candidates": len(candidates), "created": created}
+    force = bool(payload.get("force"))
+    debounce = get_detect_debounce()
+    if debounce is not None and not force:
+        if debounce.is_debounced(user.id):
+            return {"status": "debounced", "candidates": 0, "created": 0}
+        if not debounce.acquire_lock(user.id):
+            return {"status": "locked", "candidates": 0, "created": 0}
+    try:
+        min_occurrences = max(int(payload.get("min_occurrences") or 2), 2)
+        limit = min(max(int(payload.get("limit") or 25), 1), 100)
+        finance_reply = _finance_request(
+            "finance.expense_pattern_candidates",
+            {"min_occurrences": min_occurrences, "limit": limit},
+            user,
+        )
+        candidates = (finance_reply.get("payload") or {}).get("items") or []
+        created = 0
+        with SessionLocal() as db:
+            for candidate in candidates:
+                exists = db.scalar(
+                    text(
+                        """
+                        select 1
+                        from regular_expenses
+                        where user_id = :user_id
+                          and merchant_pattern = :merchant_pattern
+                          and status = 'active'
+                        """
+                    ),
+                    {"user_id": user_id, "merchant_pattern": candidate["merchant_pattern"]},
+                )
+                if exists:
+                    continue
+                db.execute(
+                    text(
+                        """
+                        insert into regular_expenses(
+                          user_id, merchant_pattern, average_amount, expected_amount, currency,
+                          frequency_days, next_expected_at, confidence, status, source_type
+                        )
+                        values (
+                          :user_id, :merchant_pattern, :average_amount, :average_amount, :currency,
+                          30, :next_expected_at, least(0.9500, cast(:occurrences as numeric) / 12.0), 'active', 'detected'
+                        )
+                        """
+                    ),
+                    {
+                        "user_id": user_id,
+                        "merchant_pattern": candidate["merchant_pattern"],
+                        "average_amount": candidate["average_amount"],
+                        "currency": candidate["currency"],
+                        "next_expected_at": _parse_datetime(candidate["next_expected_at"]),
+                        "occurrences": candidate["occurrences"],
+                    },
+                )
+                created += 1
+            db.commit()
+        if created:
+            bump_user_data_version(user.id)
+        if debounce is not None:
+            debounce.mark_detected(user.id)
+        return {"status": "detected", "candidates": len(candidates), "created": created}
+    finally:
+        if debounce is not None and not force:
+            debounce.release_lock(user.id)
 
 
 def handle_regular_expenses_due_for_reminders(payload: dict, envelope: dict) -> dict:
@@ -250,6 +291,7 @@ def handle_regular_expenses_create(payload: dict, envelope: dict) -> dict:
             },
         ).mappings().one()
         db.commit()
+    bump_user_data_version(user.id)
     return _serialize(row)
 
 
@@ -299,6 +341,7 @@ def handle_regular_expenses_update(payload: dict, envelope: dict) -> dict:
             {"regular_expense_id": regular_expense_id, "user_id": user_id, **updates},
         ).mappings().one()
         db.commit()
+    bump_user_data_version(user.id)
     return _serialize(row)
 
 
@@ -320,6 +363,7 @@ def handle_regular_expenses_delete(payload: dict, envelope: dict) -> dict:
             {"regular_expense_id": regular_expense_id, "user_id": user_id},
         )
         db.commit()
+    bump_user_data_version(str(user_id))
     return {"status": "deleted"}
 
 

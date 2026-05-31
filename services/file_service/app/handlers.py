@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from common.messaging import MessageBus, MessageError, UserContext, require_user
+from common.redis_cache import bump_user_data_version, get_import_lock
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -212,6 +213,9 @@ def handle_import_event(payload: dict, envelope: dict) -> dict:
 
 
 def process_import_job(import_id: str) -> None:
+    import_lock = get_import_lock()
+    if import_lock is not None and not import_lock.acquire(import_id):
+        return
     db = SessionLocal()
     try:
         job = db.get(ImportJob, UUID(import_id))
@@ -251,6 +255,7 @@ def process_import_job(import_id: str) -> None:
             uploaded.status = "parsed" if job.status in {"completed", "partially_completed"} else "failed"
             if job.status in {"completed", "partially_completed"}:
                 bus.publish(QUEUE_NAME, "files.import.completed.v1", {"import_id": str(job.id)})
+                bump_user_data_version(str(job.user_id))
         except Exception as exc:
             job.status = "failed"
             job.error_message = str(exc)
@@ -261,6 +266,8 @@ def process_import_job(import_id: str) -> None:
             db.commit()
     finally:
         db.close()
+        if import_lock is not None:
+            import_lock.release(import_id)
 
 
 def _fail_job(db: Session, job: ImportJob, message: str) -> None:
